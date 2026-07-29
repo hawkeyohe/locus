@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Locus — AI Agent Reliability Testing</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#"><span class="brand-mark">L</span> LOCUS</a>
+    <div class="live"><span></span> SYSTEM ONLINE</div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">AI RELIABILITY / CONTROL ROOM</p>
+        <h1>Break the system.<br><em>Find out why.</em></h1>
+        <p class="lede">Inject controlled failures into an AI research agent, inspect its execution trace, and test whether an ML classifier can identify the root cause.</p>
+      </div>
+      <div class="experiment">
+        <label for="scenario">FAILURE SCENARIO</label>
+        <select id="scenario"></select>
+        <button id="run">RUN EXPERIMENT <span>→</span></button>
+        <p id="run-status">Ready to inject a controlled failure.</p>
+      </div>
+    </section>
+
+    <section class="metrics" id="metrics"></section>
+
+    <section class="workspace">
+      <div class="panel runs-panel">
+        <div class="panel-heading"><h2>Experiment runs</h2><span id="run-count"></span></div>
+        <div id="trace-list" class="trace-list"></div>
+      </div>
+      <div class="panel detail-panel" id="detail">
+        <div class="empty">Select an experiment to inspect its trace.</div>
+      </div>
+    </section>
+  </main>
+
+  <template id="trace-template">
+    <button class="trace-row">
+      <span class="status-dot"></span>
+      <span class="trace-main"><strong></strong><small></small></span>
+      <span class="confidence"></span>
+    </button>
+  </template>
+  <script src="/app.js"></script>
+</body>
+</html>
