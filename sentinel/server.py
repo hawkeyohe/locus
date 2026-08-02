@@ -7,8 +7,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from .auth import AuthenticationError, TokenService
 from .config import settings
 from .database import Database
+from .limits import RateLimitError, SlidingWindowLimiter
+from .jobs import Worker
 from .security import CredentialVault
 from .seed import DEMO_ORG_ID, DEMO_USER_ID, seed_demo
 from .service import AuthorizationError, LocusService, NotFoundError
@@ -16,9 +19,13 @@ from .service import AuthorizationError, LocusService, NotFoundError
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "web"
-DB = Database(settings.database_path)
+settings.validate()
+DB = Database(settings.database_dsn)
 VAULT = CredentialVault(settings.encryption_key)
 SERVICE = LocusService(DB, settings, VAULT)
+EMBEDDED_WORKER = Worker(SERVICE.queue, SERVICE._execute_run, settings, "embedded")
+TOKENS = TokenService(DB)
+LIMITER = SlidingWindowLimiter()
 if settings.demo_seed:
     seed_demo(DB, settings, VAULT)
 
@@ -52,20 +59,23 @@ class Handler(BaseHTTPRequestHandler):
         return value
 
     def _identity(self) -> tuple[str, str]:
-        user_id = self.headers.get("X-Locus-User", DEMO_USER_ID if settings.demo_seed else "")
-        org_id = self.headers.get("X-Locus-Organization", DEMO_ORG_ID if settings.demo_seed else "")
-        SERVICE.context(user_id, org_id)
-        return user_id, org_id
+        authorization = self.headers.get("Authorization")
+        if settings.demo_seed and not authorization:
+            SERVICE.context(DEMO_USER_ID, DEMO_ORG_ID)
+            return DEMO_USER_ID, DEMO_ORG_ID
+        user = TOKENS.authenticate(authorization)
+        return user["id"], user["organization_id"]
 
     def _handle(self, method: str) -> None:
         parsed = urlparse(self.path); path = parsed.path.rstrip("/") or "/"; parts = path.strip("/").split("/")
+        LIMITER.check(f"ip:{self.client_address[0]}", settings.api_requests_per_minute)
         if path == "/api/dev/mock-agent" and method == "POST" and settings.demo_seed:
             data = self._body(); message = str(data.get("message", "")); status, payload, delay = mock_agent(message); time.sleep(delay)
             if isinstance(payload, bytes):
                 self.send_response(status); self.send_header("Content-Type", "text/plain"); self.send_header("Content-Length", str(len(payload))); self.end_headers(); self.wfile.write(payload)
             else: self._json(payload, status)
             return
-        user_id, org_id = self._identity(); data = self._body() if method in {"POST", "PATCH", "PUT"} else {}
+        user_id, org_id = self._identity(); LIMITER.check(f"org:{org_id}", settings.organization_requests_per_minute); data = self._body() if method in {"POST", "PATCH", "PUT"} else {}
         if path == "/api/dashboard" and method == "GET": return self._json(SERVICE.dashboard(org_id))
         if path == "/api/agents":
             if method == "GET": return self._json({"agents": SERVICE.list_agents(org_id)})
@@ -115,7 +125,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _safe(self, method: str) -> None:
         try: self._handle(method)
+        except AuthenticationError as exc: self._json({"error": str(exc)}, 401)
         except AuthorizationError as exc: self._json({"error": str(exc)}, 403)
+        except RateLimitError as exc: self._json({"error": str(exc)}, 429)
         except NotFoundError as exc: self._json({"error": str(exc)}, 404)
         except (ValueError, KeyError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400)
         except Exception as exc: self._json({"error": "Internal server error", "detail": str(exc) if settings.demo_seed else None}, 500)
@@ -130,9 +142,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    server = ThreadingHTTPServer(("127.0.0.1", settings.port), Handler); print(f"Locus running at http://localhost:{settings.port}")
+    server = ThreadingHTTPServer(("127.0.0.1", settings.port), Handler)
+    worker_thread = EMBEDDED_WORKER.start_thread() if settings.embedded_worker else None
+    print(f"Locus running at http://localhost:{settings.port}")
     try: server.serve_forever()
-    except KeyboardInterrupt: server.server_close()
+    except KeyboardInterrupt: pass
+    finally:
+        server.server_close(); EMBEDDED_WORKER.stop()
+        if worker_thread: worker_thread.join(timeout=2)
 
 
 if __name__ == "__main__": main()

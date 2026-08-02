@@ -15,8 +15,8 @@ python3 -m venv .venv
 cp .env.example .env
 ```
 
-Export the values from `.env` in your shell. Generate a production-grade encryption
-key with:
+Locus loads `.env` automatically without overriding variables already supplied by
+the process. Generate a production-grade encryption key with:
 
 ```bash
 .venv/bin/python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -37,8 +37,12 @@ Start the application:
 
 Open [http://localhost:8000](http://localhost:8000).
 
-The development worker is an in-process, bounded thread pool, so no separate worker
-command is needed. Production should replace it with a durable external queue.
+Development starts an embedded durable worker by default. Production runs workers as
+separate processes backed by the shared database:
+
+```bash
+.venv/bin/python -m scripts.worker
+```
 
 ## Architecture
 
@@ -46,8 +50,9 @@ command is needed. Production should replace it with a durable external queue.
 Browser UI
   -> organization-scoped JSON API
      -> agent connection service -> SSRF guard -> customer HTTPS endpoint
-     -> SQLite repositories
-     -> bounded background worker
+     -> SQLite or PostgreSQL repositories
+     -> durable database job queue
+        -> leased standalone workers
         -> template renderer
         -> HTTP execution + retry policy
         -> deterministic evaluator registry
@@ -57,7 +62,9 @@ Browser UI
 
 Core modules:
 
-- `sentinel/database.py`: schema, migration initialization, and SQLite access
+- `sentinel/database.py`: versioned migrations and SQLite/PostgreSQL access
+- `sentinel/jobs.py`: durable queue, atomic claims, leases, heartbeats, retry backoff,
+  duplicate prevention, recovery, and cancellation
 - `sentinel/security.py`: Fernet credential vault, SSRF validation, safe templates,
   response-path extraction, header validation, and recursive secret redaction
 - `sentinel/connectivity.py`: bounded HTTP client, DNS revalidation, redirects disabled,
@@ -70,10 +77,21 @@ Core modules:
 
 ## API identity
 
-The current development server uses `X-Locus-User` and `X-Locus-Organization`
-headers and validates that the user belongs to the organization on every operation.
-Demo mode supplies the seeded identity automatically. Replace this development
-identity adapter with production SSO/session authentication before deployment.
+Production APIs require an opaque bearer token. Only a SHA-256 token digest is
+stored, and the server derives the user and organization from that record. Browser
+organization headers are not trusted. Demo mode supplies the seeded identity when
+no bearer token is present.
+
+Issue a token for an existing user:
+
+```bash
+.venv/bin/python -m scripts.create_token user_demo --name "Local browser"
+```
+
+The plaintext token is displayed only once. API clients send it as
+`Authorization: Bearer <token>`. The browser client reads an optional token from
+`sessionStorage` under `locus_access_token`; production login/SSO UI remains a
+deployment integration.
 
 ## Security defaults
 
@@ -88,6 +106,38 @@ identity adapter with production SSO/session authentication before deployment.
 - Unsafe headers are rejected and response secrets are recursively redacted.
 - Request/response sizes, timeouts, retries, worker concurrency, and organization
   execution counts are bounded.
+- Per-client and per-organization sliding-window API limits are enabled.
+- Production startup rejects demo data, local endpoints, and the development key.
+- Production startup also rejects the embedded worker so web and worker processes
+  remain independently scalable.
+
+## PostgreSQL and workers
+
+SQLite remains the zero-configuration development database. For staging or
+production, set:
+
+```dotenv
+LOCUS_DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/locus
+LOCUS_EMBEDDED_WORKER=false
+```
+
+Apply numbered migrations before starting either process:
+
+```bash
+.venv/bin/python -m scripts.migrate
+```
+
+Then start the web process and one or more workers:
+
+```bash
+.venv/bin/python -m sentinel.server
+.venv/bin/python -m scripts.worker
+```
+
+Each run has one database-enforced job. Workers claim jobs atomically, heartbeat
+their leases, recover expired leases after process failure, and retry infrastructure
+failures with bounded exponential backoff. Application-level HTTP retries remain in
+the agent connectivity service.
 
 ## Tests
 
@@ -108,8 +158,10 @@ checked-in development encryption fallback outside local development.
 
 ## Known Version 1 limitations
 
-- SQLite and the in-process worker target a single application instance.
-- Development header identity is not production authentication.
+- SQLite is intended for local development; production PostgreSQL deployment and
+  backup infrastructure must be provisioned by the operator.
+- Bearer tokens are available, but interactive login, SSO, password recovery, and
+  organization administration remain production identity-provider integrations.
 - Redirects are disabled rather than revalidated through a redirect chain.
 - Cancellation is cooperative between test cases, not during an active HTTP request.
 - Tool-call evaluation is reserved for a future optional response-path configuration.
@@ -117,6 +169,6 @@ checked-in development encryption fallback outside local development.
   hallucination detection and has no required LLM judge.
 - JSON export is available; PDF export is intentionally deferred.
 
-Recommended production upgrades are PostgreSQL, durable queue workers with leases,
-SSO/OIDC, a managed key-encryption service, distributed rate limiting, outbound
-network egress controls, structured metrics, and deployment-specific audit retention.
+Recommended production upgrades are SSO/OIDC, a managed key-encryption service,
+distributed rate limiting, outbound network egress controls, structured metrics,
+database backups, and deployment-specific audit retention.

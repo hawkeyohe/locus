@@ -7,10 +7,13 @@ name = "locus"
 version = "0.2.0"
 description = "Continuous security and reliability testing for HTTP-based AI agents"
 requires-python = ">=3.11"
-dependencies = ["cryptography>=42,<46"]
+dependencies = ["cryptography>=42,<46", "psycopg[binary]>=3.2,<4"]
 
 [tool.setuptools]
 packages = ["sentinel"]
+
+[tool.setuptools.package-data]
+sentinel = ["migrations/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

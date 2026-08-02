@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .config import Settings
 from .connectivity import AgentClient
 from .database import Database, decode_row, encode_json, new_id, now
 from .evaluators import EvaluationContext, evaluate, validate_evaluator_config
+from .jobs import DurableJobQueue
 from .scoring import calculate_scores, compare_results
 from .security import CredentialVault, mask_credentials, redact, validate_endpoint
 
@@ -25,7 +26,7 @@ class LocusService:
     def __init__(self, db: Database, settings: Settings, vault: CredentialVault) -> None:
         self.db, self.settings, self.vault = db, settings, vault
         self.client = AgentClient(settings, vault)
-        self.pool = ThreadPoolExecutor(max_workers=settings.worker_concurrency, thread_name_prefix="locus-worker")
+        self.queue = DurableJobQueue(db, settings)
         self.cancelled: set[str] = set()
         self._lock = threading.Lock()
 
@@ -127,14 +128,14 @@ class LocusService:
         if agent["status"] != "active": raise ValueError("Agent must pass its connection test before a run")
         active = self.db.one("SELECT COUNT(*) AS count FROM test_runs WHERE organization_id=? AND status IN ('queued','running')", (org_id,))
         if active and active["count"] >= self.settings.worker_concurrency * 2: raise ValueError("Organization execution limit reached; wait for an active run to finish")
+        cutoff = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        recent = self.db.one("SELECT COUNT(*) AS count FROM test_runs WHERE organization_id=? AND created_at>=?", (org_id, cutoff))
+        if recent and recent["count"] >= self.settings.organization_runs_per_hour: raise ValueError("Organization hourly test-run limit reached")
         baseline = self.db.one("SELECT id FROM test_runs WHERE organization_id=? AND agent_id=? AND test_suite_id=? AND status='completed' ORDER BY completed_at DESC LIMIT 1", (org_id, agent_id, suite_id))
         run_id, timestamp = new_id("run"), now(); self.db.insert("test_runs", {"id": run_id, "organization_id": org_id, "agent_id": agent_id, "test_suite_id": suite_id, "status": "queued", "progress": 0, "overall_score": None, "security_score": None, "reliability_score": None, "compliance_score": None, "started_at": None, "completed_at": None, "duration_ms": None, "error_message": None, "configuration": encode_json(configuration or {}), "baseline_run_id": baseline["id"] if baseline else None, "created_at": timestamp, "updated_at": timestamp})
-        self.audit(org_id, user_id, "run.started", "test_run", run_id); self.pool.submit(self._execute_run, run_id); return decode_row(self.db.one("SELECT * FROM test_runs WHERE id=?", (run_id,))) or {}
+        self.audit(org_id, user_id, "run.started", "test_run", run_id); self.queue.enqueue(run_id); return decode_row(self.db.one("SELECT * FROM test_runs WHERE id=?", (run_id,))) or {}
 
     def _execute_run(self, run_id: str) -> None:
-        with self._lock:
-            try: self.db.insert("job_claims", {"run_id": run_id, "claimed_at": now()})
-            except Exception: return
         started = time.monotonic(); run = decode_row(self.db.one("SELECT * FROM test_runs WHERE id=?", (run_id,))) or {}; agent = self._owned("agents", run["agent_id"], run["organization_id"])
         cases = [decode_row(row) or {} for row in self.db.all("SELECT * FROM test_cases WHERE test_suite_id=? AND enabled=1 LIMIT ?", (run["test_suite_id"], self.settings.max_tests_per_run))]
         self.db.execute("UPDATE test_runs SET status='running',started_at=?,updated_at=? WHERE id=?", (now(), now(), run_id))
@@ -151,7 +152,7 @@ class LocusService:
             self.db.execute("UPDATE test_runs SET status='failed',error_message=?,completed_at=?,updated_at=? WHERE id=?", (str(exc), now(), now(), run_id))
 
     def cancel_run(self, org_id: str, user_id: str, run_id: str) -> None:
-        self._owned("test_runs", run_id, org_id); self.cancelled.add(run_id); self.audit(org_id, user_id, "run.cancelled", "test_run", run_id)
+        self._owned("test_runs", run_id, org_id); self.cancelled.add(run_id); self.queue.cancel(run_id); self.db.execute("UPDATE test_runs SET status='cancelled',completed_at=?,updated_at=? WHERE id=? AND status='queued'", (now(),now(),run_id)); self.audit(org_id, user_id, "run.cancelled", "test_run", run_id)
 
     def get_run(self, org_id: str, run_id: str) -> dict[str, Any]:
         run = self._owned("test_runs", run_id, org_id); run["results"] = [decode_row(row) for row in self.db.all("SELECT r.*,c.name AS test_name FROM test_results r JOIN test_cases c ON c.id=r.test_case_id WHERE r.test_run_id=? ORDER BY r.created_at", (run_id,))]; return run

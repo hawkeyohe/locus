@@ -4,6 +4,6 @@ from sentinel.database import Database
 from sentinel.security import CredentialVault
 from sentinel.seed import seed_demo
 
-database = Database(settings.database_path)
+database = Database(settings.database_dsn)
 seed_demo(database, settings, CredentialVault(settings.encryption_key))
 print("Development seed data ready")

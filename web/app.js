@@ -1,6 +1,7 @@
 const state = { agents: [], suites: [], runs: [], selectedRun: null, pendingAgent: null, poller: null };
 const api = async (path, options = {}) => {
-  const response = await fetch(path, { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options });
+  const token = sessionStorage.getItem("locus_access_token");
+  const response = await fetch(path, { headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) }, ...options });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Request failed");
   return data;

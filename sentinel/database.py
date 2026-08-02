@@ -10,21 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
-SCHEMA = """
-PRAGMA foreign_keys = ON;
-CREATE TABLE IF NOT EXISTS organizations (id TEXT PRIMARY KEY, name TEXT NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, organization_id TEXT NOT NULL REFERENCES organizations(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', endpoint_url TEXT NOT NULL, http_method TEXT NOT NULL DEFAULT 'POST', authentication_type TEXT NOT NULL, encrypted_credentials TEXT, request_template TEXT NOT NULL, response_path TEXT NOT NULL, request_headers TEXT NOT NULL DEFAULT '{}', timeout_ms INTEGER NOT NULL, status TEXT NOT NULL, last_connection_test_at TEXT, last_connection_test_status TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS test_suites (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS test_cases (id TEXT PRIMARY KEY, test_suite_id TEXT NOT NULL REFERENCES test_suites(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', category TEXT NOT NULL, default_severity TEXT NOT NULL, input TEXT NOT NULL, expected_behavior TEXT NOT NULL, evaluator_type TEXT NOT NULL, evaluator_config TEXT NOT NULL DEFAULT '{}', timeout_ms INTEGER NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS test_runs (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(id), agent_id TEXT NOT NULL REFERENCES agents(id), test_suite_id TEXT NOT NULL REFERENCES test_suites(id), status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, overall_score REAL, security_score REAL, reliability_score REAL, compliance_score REAL, started_at TEXT, completed_at TEXT, duration_ms INTEGER, error_message TEXT, configuration TEXT NOT NULL DEFAULT '{}', baseline_run_id TEXT REFERENCES test_runs(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS test_results (id TEXT PRIMARY KEY, test_run_id TEXT NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE, test_case_id TEXT NOT NULL REFERENCES test_cases(id), status TEXT NOT NULL, category TEXT NOT NULL, severity TEXT NOT NULL, score REAL NOT NULL, input TEXT NOT NULL, expected_behavior TEXT NOT NULL, actual_behavior TEXT, evidence TEXT NOT NULL, remediation TEXT NOT NULL, latency_ms INTEGER, http_status INTEGER, error_type TEXT, raw_response TEXT, response_metadata TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, user_id TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS job_claims (run_id TEXT PRIMARY KEY, claimed_at TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_agents_org ON agents(organization_id);
-CREATE INDEX IF NOT EXISTS idx_runs_org_agent ON test_runs(organization_id, agent_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_results_run ON test_results(test_run_id);
-"""
+MIGRATIONS = Path(__file__).resolve().parent / "migrations"
 
 
 def now() -> str:
@@ -36,16 +22,36 @@ def new_id(prefix: str) -> str:
 
 
 class Database:
-    def __init__(self, path: str | Path) -> None:
-        self.path = str(path)
+    """Small database abstraction supporting SQLite locally and PostgreSQL in production."""
+
+    def __init__(self, dsn: str | Path) -> None:
+        raw = str(dsn)
+        if raw.startswith(("postgres://", "postgresql://")):
+            self.backend, self.dsn = "postgresql", raw
+        else:
+            self.backend = "sqlite"
+            self.dsn = raw.removeprefix("sqlite:///")
+        self.path = self.dsn  # Compatibility for local tooling.
         self._lock = threading.RLock()
         self.initialize()
 
+    def _sql(self, sql: str) -> str:
+        return sql.replace("?", "%s") if self.backend == "postgresql" else sql
+
     @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path, timeout=15)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
+    def connect(self) -> Iterator[Any]:
+        if self.backend == "postgresql":
+            try:
+                import psycopg
+                from psycopg.rows import dict_row
+            except ImportError as exc:
+                raise RuntimeError("Install psycopg to use PostgreSQL") from exc
+            connection = psycopg.connect(self.dsn, row_factory=dict_row)
+        else:
+            connection = sqlite3.connect(self.dsn, timeout=15)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA journal_mode = WAL")
         try:
             yield connection
             connection.commit()
@@ -57,20 +63,31 @@ class Database:
 
     def initialize(self) -> None:
         with self._lock, self.connect() as connection:
-            connection.executescript(SCHEMA)
+            connection.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)")
+            applied_rows = connection.execute("SELECT version FROM schema_migrations").fetchall()
+            applied = {int(row["version"] if isinstance(row, (dict, sqlite3.Row)) else row[0]) for row in applied_rows}
+            for path in sorted(MIGRATIONS.glob("*.sql")):
+                version = int(path.name.split("_", 1)[0])
+                if version in applied:
+                    continue
+                statements = [statement.strip() for statement in path.read_text().split(";") if statement.strip()]
+                for statement in statements:
+                    connection.execute(statement)
+                connection.execute(self._sql("INSERT INTO schema_migrations(version,name,applied_at) VALUES (?,?,?) ON CONFLICT(version) DO NOTHING"), (version, path.name, now()))
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> int:
         with self._lock, self.connect() as connection:
-            return connection.execute(sql, params).rowcount
+            cursor = connection.execute(self._sql(sql), params)
+            return cursor.rowcount
 
     def one(self, sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         with self.connect() as connection:
-            row = connection.execute(sql, params).fetchone()
+            row = connection.execute(self._sql(sql), params).fetchone()
         return dict(row) if row else None
 
     def all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         with self.connect() as connection:
-            return [dict(row) for row in connection.execute(sql, params).fetchall()]
+            return [dict(row) for row in connection.execute(self._sql(sql), params).fetchall()]
 
     def insert(self, table: str, data: dict[str, Any]) -> None:
         keys = list(data)
