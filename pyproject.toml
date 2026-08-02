@@ -1,8 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "locus"
-version = "0.1.0"
-description = "An interactive ML incident simulator and diagnosis lab"
+version = "0.2.0"
+description = "Continuous security and reliability testing for HTTP-based AI agents"
 requires-python = ">=3.11"
+dependencies = ["cryptography>=42,<46"]
+
+[tool.setuptools]
+packages = ["sentinel"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

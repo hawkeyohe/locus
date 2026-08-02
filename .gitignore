@@ -4,4 +4,8 @@ __pycache__/
 .venv/
 coverage.xml
 .coverage
-
+.env
+locus.db
+locus.db-shm
+locus.db-wal
+*.egg-info/

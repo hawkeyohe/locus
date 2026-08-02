@@ -1,52 +1,67 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Locus — AI Agent Reliability Testing</title>
-  <link rel="stylesheet" href="/styles.css">
-</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Locus — Continuous AI Agent Testing</title><link rel="stylesheet" href="/styles.css"></head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#"><span class="brand-mark">L</span> LOCUS</a>
-    <div class="live"><span></span> SYSTEM ONLINE</div>
+    <a class="brand" href="#"><span class="brand-mark">L</span>Locus</a>
+    <nav class="product-nav"><a class="active" href="#workspace">Workspace</a><a href="#runs">Runs</a><a href="#report">Reports</a></nav>
+    <div class="top-actions"><div class="live"><span></span>Systems ready</div><span class="avatar">DU</span></div>
   </header>
+  <main class="app-shell" id="workspace">
+    <aside class="setup-column">
+      <div class="column-heading"><span class="step">1</span><div><h1>Connect an agent</h1><p>Authenticated HTTP endpoints only.</p></div></div>
+      <form id="agent-form">
+        <label class="field-label" for="agent-name">Agent name</label><input class="text-input" id="agent-name" required placeholder="Customer support agent">
+        <label class="field-label" for="agent-description">Description</label><input class="text-input" id="agent-description" placeholder="Production support endpoint">
+        <label class="field-label" for="endpoint">POST endpoint</label><input class="text-input" id="endpoint" type="url" required placeholder="https://api.example.com/agent">
+        <div class="form-grid"><div><label class="field-label" for="auth-type">Authentication</label><select id="auth-type"><option value="none">None</option><option value="bearer">Bearer token</option><option value="api_key">API key header</option><option value="basic">Basic authentication</option></select></div><div><label class="field-label" for="timeout">Timeout (ms)</label><input class="text-input" id="timeout" type="number" min="250" max="60000" value="10000"></div></div>
+        <div id="credentials" hidden></div>
+        <details class="advanced"><summary>Request configuration</summary>
+          <label class="field-label" for="headers">Custom headers (JSON)</label><textarea id="headers" rows="3">{}</textarea>
+          <label class="field-label" for="request-template">Request template (JSON)</label><textarea id="request-template" rows="8">{
+  "message": "{{test_input}}",
+  "sessionId": "{{session_id}}",
+  "metadata": {
+    "testRunId": "{{test_run_id}}",
+    "testCaseId": "{{test_case_id}}"
+  }
+}</textarea>
+          <label class="field-label" for="response-path">Response text path</label><input class="text-input" id="response-path" value="response.text" required>
+        </details>
+        <button class="secondary-button" id="test-connection" type="button">Test connection</button><button id="save-agent" type="submit">Save agent <span>→</span></button>
+        <div class="connection-result" id="connection-result" hidden></div>
+      </form>
+      <div class="privacy-note"><strong>Credentials stay protected</strong><p>Encrypted at rest, masked after saving, and excluded from logs and reports.</p></div>
+    </aside>
 
-  <main>
-    <section class="hero">
-      <div>
-        <p class="eyebrow">AI RELIABILITY / CONTROL ROOM</p>
-        <h1>Break the system.<br><em>Find out why.</em></h1>
-        <p class="lede">Inject controlled failures into an AI research agent, inspect its execution trace, and test whether an ML classifier can identify the root cause.</p>
+    <section class="diagnostics-column" id="runs">
+      <div class="column-heading"><span class="step">2</span><div><h2>Run a test suite</h2><p>Choose a validated agent and deterministic checks.</p></div></div>
+      <div class="overview-card"><div><span class="overview-label">Continuous assurance</span><strong>Security & reliability baseline</strong><p>Track failures and regressions across versions.</p></div><div class="health-ring"><span id="health-score">—</span></div></div>
+      <div class="metrics" id="metrics"></div>
+      <div class="run-config panel">
+        <label class="field-label" for="agent-select">Agent</label><select id="agent-select"></select>
+        <label class="field-label" for="suite-select">Test suite</label><select id="suite-select"></select>
+        <div id="suite-cases" class="suite-cases"></div>
+        <div class="run-actions"><button class="secondary-button" id="new-test">+ Custom test</button><button id="run">Start test run <span>→</span></button></div>
+        <p id="run-status">Select an active agent and suite.</p>
       </div>
-      <div class="experiment">
-        <label for="scenario">FAILURE SCENARIO</label>
-        <select id="scenario"></select>
-        <button id="run">RUN EXPERIMENT <span>→</span></button>
-        <p id="run-status">Ready to inject a controlled failure.</p>
-      </div>
+      <div class="panel runs-panel"><div class="panel-heading"><div><h3>Historical runs</h3><p>Completed and in-progress evaluations</p></div><span id="run-count">0 runs</span></div><div id="trace-list" class="trace-list"></div></div>
     </section>
 
-    <section class="metrics" id="metrics"></section>
-
-    <section class="workspace">
-      <div class="panel runs-panel">
-        <div class="panel-heading"><h2>Experiment runs</h2><span id="run-count"></span></div>
-        <div id="trace-list" class="trace-list"></div>
-      </div>
-      <div class="panel detail-panel" id="detail">
-        <div class="empty">Select an experiment to inspect its trace.</div>
-      </div>
+    <section class="results-column" id="report">
+      <div class="column-heading result-heading"><div><span class="eyebrow">Selected run</span><h2>Reliability report</h2></div><button class="export-button" id="export-report" disabled>Export JSON</button></div>
+      <div class="panel detail-panel" id="detail"><div class="empty"><div><strong>No report selected</strong><p>Start or select a historical run to inspect findings and regression evidence.</p></div></div></div>
     </section>
   </main>
 
-  <template id="trace-template">
-    <button class="trace-row">
-      <span class="status-dot"></span>
-      <span class="trace-main"><strong></strong><small></small></span>
-      <span class="confidence"></span>
-    </button>
-  </template>
+  <dialog id="test-dialog"><form method="dialog" id="test-form"><div class="dialog-heading"><div><span class="eyebrow">Custom business rule</span><h2>Create a test</h2></div><button value="cancel" aria-label="Close">×</button></div>
+    <label class="field-label">Name</label><input class="text-input" name="name" required>
+    <label class="field-label">Test input</label><textarea name="input" rows="3" required></textarea>
+    <label class="field-label">Expected behavior</label><textarea name="expectedBehavior" rows="3" required></textarea>
+    <div class="form-grid"><div><label class="field-label">Severity</label><select name="defaultSeverity"><option>critical</option><option>high</option><option selected>medium</option><option>low</option></select></div><div><label class="field-label">Evaluator</label><select name="evaluatorType"><option value="must_not_contain">Must not contain</option><option value="required_phrase">Required phrase</option><option value="regex_match">Regex match</option><option value="maximum_latency">Maximum latency</option><option value="required_confirmation">Required confirmation</option><option value="refusal_detection">Refusal detection</option></select></div></div>
+    <label class="field-label">Evaluator configuration (JSON)</label><textarea name="evaluatorConfig" rows="4">{"values":["prohibited phrase"]}</textarea>
+    <div class="dialog-actions"><button value="cancel" class="secondary-button">Cancel</button><button value="default" id="save-test">Create test</button></div>
+  </form></dialog>
+  <template id="trace-template"><button class="trace-row"><span class="status-icon"></span><span class="trace-main"><strong></strong><small></small></span><span class="confidence"></span><span class="row-arrow">›</span></button></template>
   <script src="/app.js"></script>
-</body>
-</html>
+</body></html>
