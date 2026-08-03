@@ -4,12 +4,12 @@
 <body>
   <header class="topbar">
     <a class="brand" href="#"><span class="brand-mark">L</span>Locus</a>
-    <nav class="product-nav"><a class="active" href="#workspace">Workspace</a><a href="#runs">Runs</a><a href="#report">Reports</a></nav>
+    <nav class="product-nav"><a class="active" href="#workspace">Workspace</a><button id="manage-agents">Agents</button><button id="manage-suites">Test library</button><a href="#report">Reports</a></nav>
     <div class="top-actions"><div class="live"><span></span>Systems ready</div><span class="avatar">DU</span></div>
   </header>
   <main class="app-shell" id="workspace">
     <aside class="setup-column">
-      <div class="column-heading"><span class="step">1</span><div><h1>Connect an agent</h1><p>Authenticated HTTP endpoints only.</p></div></div>
+      <div class="column-heading"><span class="step">1</span><div><h1>Connect an agent</h1><p>Authenticated HTTP endpoints only.</p></div><button class="heading-action" id="manage-agents-secondary">Manage</button></div>
       <form id="agent-form">
         <label class="field-label" for="agent-name">Agent name</label><input class="text-input" id="agent-name" required placeholder="Customer support agent">
         <label class="field-label" for="agent-description">Description</label><input class="text-input" id="agent-description" placeholder="Production support endpoint">
@@ -35,7 +35,7 @@
     </aside>
 
     <section class="diagnostics-column" id="runs">
-      <div class="column-heading"><span class="step">2</span><div><h2>Run a test suite</h2><p>Choose a validated agent and deterministic checks.</p></div></div>
+      <div class="column-heading"><span class="step">2</span><div><h2>Run a test suite</h2><p>Choose a validated agent and deterministic checks.</p></div><button class="heading-action" id="manage-suites-secondary">Manage</button></div>
       <div class="overview-card"><div><span class="overview-label">Continuous assurance</span><strong>Security & reliability baseline</strong><p>Track failures and regressions across versions.</p></div><div class="health-ring"><span id="health-score">—</span></div></div>
       <div class="metrics" id="metrics"></div>
       <div class="run-config panel">
@@ -54,14 +54,28 @@
     </section>
   </main>
 
-  <dialog id="test-dialog"><form method="dialog" id="test-form"><div class="dialog-heading"><div><span class="eyebrow">Custom business rule</span><h2>Create a test</h2></div><button value="cancel" aria-label="Close">×</button></div>
+  <dialog id="test-dialog"><form method="dialog" id="test-form"><div class="dialog-heading"><div><span class="eyebrow">Deterministic check</span><h2 id="test-dialog-title">Create a test</h2></div><button value="cancel" aria-label="Close">×</button></div>
     <label class="field-label">Name</label><input class="text-input" name="name" required>
+    <label class="field-label">Description</label><input class="text-input" name="description">
     <label class="field-label">Test input</label><textarea name="input" rows="3" required></textarea>
     <label class="field-label">Expected behavior</label><textarea name="expectedBehavior" rows="3" required></textarea>
-    <div class="form-grid"><div><label class="field-label">Severity</label><select name="defaultSeverity"><option>critical</option><option>high</option><option selected>medium</option><option>low</option></select></div><div><label class="field-label">Evaluator</label><select name="evaluatorType"><option value="must_not_contain">Must not contain</option><option value="required_phrase">Required phrase</option><option value="regex_match">Regex match</option><option value="maximum_latency">Maximum latency</option><option value="required_confirmation">Required confirmation</option><option value="refusal_detection">Refusal detection</option></select></div></div>
+    <div class="form-grid"><div><label class="field-label">Category</label><select name="category"><option value="business_rule">Business rule</option><option value="prompt_injection">Prompt injection</option><option value="sensitive_data">Sensitive data</option><option value="tool_misuse">Tool misuse</option><option value="hallucination">Hallucination</option><option value="reliability">Reliability</option></select></div><div><label class="field-label">Severity</label><select name="defaultSeverity"><option>critical</option><option>high</option><option selected>medium</option><option>low</option><option>informational</option></select></div></div>
+    <div class="form-grid"><div><label class="field-label">Evaluator</label><select name="evaluatorType"><option value="must_not_contain">Must not contain</option><option value="required_phrase">Required phrase</option><option value="regex_match">Regex match</option><option value="maximum_latency">Maximum latency</option><option value="required_confirmation">Required confirmation</option><option value="refusal_detection">Refusal detection</option><option value="non_empty_response">Non-empty response</option><option value="http_status">HTTP status</option></select></div><div><label class="field-label">Timeout (ms)</label><input class="text-input" name="timeoutMs" type="number" min="250" max="60000" value="10000"></div></div>
     <label class="field-label">Evaluator configuration (JSON)</label><textarea name="evaluatorConfig" rows="4">{"values":["prohibited phrase"]}</textarea>
     <div class="dialog-actions"><button value="cancel" class="secondary-button">Cancel</button><button value="default" id="save-test">Create test</button></div>
   </form></dialog>
+
+  <dialog class="manager-dialog" id="agents-dialog"><div class="manager-shell"><aside><div class="manager-title"><div><span class="eyebrow">Connections</span><h2>Saved agents</h2></div><button data-close="agents-dialog">×</button></div><div id="agent-manager-list" class="manager-list"></div></aside><section><form id="agent-edit-form"><div class="manager-title"><div><span class="eyebrow">Agent configuration</span><h2 id="agent-edit-title">Select an agent</h2></div><span id="agent-edit-status" class="status-badge"></span></div><div id="agent-edit-fields" hidden>
+    <label class="field-label">Name</label><input class="text-input" name="name" required><label class="field-label">Description</label><input class="text-input" name="description"><label class="field-label">POST endpoint</label><input class="text-input" name="endpointUrl" type="url" required>
+    <div class="form-grid"><div><label class="field-label">Authentication</label><select name="authenticationType"><option value="none">None</option><option value="bearer">Bearer token</option><option value="api_key">API key header</option><option value="basic">Basic authentication</option></select></div><div><label class="field-label">Timeout (ms)</label><input class="text-input" name="timeoutMs" type="number" min="250" max="60000"></div></div>
+    <div id="agent-edit-credentials"></div><label class="field-label">Custom headers (JSON)</label><textarea name="requestHeaders" rows="3"></textarea><label class="field-label">Request template</label><textarea name="requestTemplate" rows="7"></textarea><label class="field-label">Response path</label><input class="text-input" name="responsePath">
+    <div class="manager-actions"><button type="button" class="danger-button" data-agent-action="delete">Delete</button><button type="button" class="secondary-button" data-agent-action="toggle"></button><button type="button" class="secondary-button" data-agent-action="test">Test connection</button><button type="submit">Save changes</button></div><div class="connection-result" id="agent-manager-result" hidden></div>
+  </div></form></section></div></dialog>
+
+  <dialog class="manager-dialog" id="suites-dialog"><div class="manager-shell"><aside><div class="manager-title"><div><span class="eyebrow">Test library</span><h2>Suites</h2></div><button data-close="suites-dialog">×</button></div><button class="new-resource" id="new-suite">+ New suite</button><div id="suite-manager-list" class="manager-list"></div></aside><section><form id="suite-edit-form"><div class="manager-title"><div><span class="eyebrow">Suite configuration</span><h2 id="suite-edit-title">Select a suite</h2></div></div><div id="suite-edit-fields" hidden>
+    <label class="field-label">Name</label><input class="text-input" name="name" required><label class="field-label">Description</label><textarea name="description" rows="3"></textarea><div class="manager-actions suite-actions"><button type="button" class="danger-button" data-suite-action="delete">Delete</button><button type="button" class="secondary-button" data-suite-action="duplicate">Duplicate</button><button type="submit">Save suite</button></div>
+    <div class="case-heading"><div><span class="eyebrow">Included checks</span><h3>Test cases</h3></div><button type="button" class="secondary-button" id="add-managed-test">+ Add test</button></div><div id="managed-cases" class="managed-cases"></div><div class="connection-result" id="suite-manager-result" hidden></div>
+  </div></form></section></div></dialog>
   <template id="trace-template"><button class="trace-row"><span class="status-icon"></span><span class="trace-main"><strong></strong><small></small></span><span class="confidence"></span><span class="row-arrow">›</span></button></template>
   <script src="/app.js"></script>
 </body></html>

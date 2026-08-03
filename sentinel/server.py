@@ -15,7 +15,7 @@ from .jobs import Worker
 from .observability import Metrics, log_event, request_id, route_name
 from .security import CredentialVault
 from .seed import DEMO_ORG_ID, DEMO_USER_ID, seed_demo
-from .service import AuthorizationError, LocusService, NotFoundError
+from .service import AuthorizationError, ConflictError, LocusService, NotFoundError
 
 
 STATIC = settings.static_dir
@@ -146,6 +146,7 @@ class Handler(BaseHTTPRequestHandler):
         try: self._handle(method)
         except AuthenticationError as exc: self._json({"error": str(exc)}, 401)
         except AuthorizationError as exc: self._json({"error": str(exc)}, 403)
+        except ConflictError as exc: self._json({"error": str(exc)}, 409)
         except RateLimitError as exc: self._json({"error": str(exc)}, 429)
         except NotFoundError as exc: self._json({"error": str(exc)}, 404)
         except (ValueError, KeyError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400)

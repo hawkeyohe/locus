@@ -17,7 +17,7 @@ from sentinel.limits import RateLimitError, SlidingWindowLimiter
 from sentinel.jobs import Worker
 from sentinel.scoring import calculate_scores, compare_results
 from sentinel.security import CredentialVault, SecurityError, extract_path, redact, substitute_template, validate_endpoint
-from sentinel.service import AuthorizationError, LocusService
+from sentinel.service import AuthorizationError, ConflictError, LocusService
 
 
 class PlatformTests(unittest.TestCase):
@@ -41,6 +41,36 @@ class PlatformTests(unittest.TestCase):
         with patch("sentinel.service.validate_endpoint", return_value=("https://example.com", ["93.184.216.34"])):
             agent = self.service.create_agent("org_a", "user_a", {"name":"Agent","endpointUrl":"https://example.com","authenticationType":"bearer","credentials":{"token":"abc"},"requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text"})
         self.assertNotIn("encrypted_credentials", agent); self.assertEqual(agent["credentials"]["masked"], "••••••••")
+
+    def test_agent_updates_preserve_or_rotate_credentials_and_revalidate_endpoint(self):
+        with patch("sentinel.service.validate_endpoint", return_value=("https://example.com", ["93.184.216.34"])):
+            agent = self.service.create_agent("org_a", "user_a", {"name":"Agent","endpointUrl":"https://example.com","authenticationType":"bearer","credentials":{"token":"first"},"requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text"})
+            encrypted = self.db.one("SELECT encrypted_credentials FROM agents WHERE id=?", (agent["id"],))["encrypted_credentials"]
+            preserved = self.service.update_agent("org_a", "user_a", agent["id"], {"name":"Renamed"})
+            self.assertEqual(self.db.one("SELECT encrypted_credentials FROM agents WHERE id=?", (agent["id"],))["encrypted_credentials"], encrypted)
+            self.assertNotIn("encrypted_credentials", preserved)
+            self.service.update_agent("org_a", "user_a", agent["id"], {"credentials":{"token":"second"}})
+            rotated = self.db.one("SELECT encrypted_credentials FROM agents WHERE id=?", (agent["id"],))["encrypted_credentials"]
+            self.assertNotEqual(rotated, encrypted); self.assertEqual(self.vault.decrypt(rotated)["token"], "second")
+        self.db.execute("UPDATE agents SET status='active',last_connection_test_status='passed' WHERE id=?", (agent["id"],))
+        with patch("sentinel.service.validate_endpoint", return_value=("https://other.example", ["93.184.216.35"])):
+            updated = self.service.update_agent("org_a", "user_a", agent["id"], {"endpointUrl":"https://other.example"})
+        self.assertEqual((updated["status"], updated["last_connection_test_status"]), ("draft", None))
+
+    def test_agent_cannot_be_enabled_before_successful_connection_test(self):
+        with patch("sentinel.service.validate_endpoint", return_value=("https://example.com", ["93.184.216.34"])):
+            agent = self.service.create_agent("org_a", "user_a", {"name":"Agent","endpointUrl":"https://example.com","authenticationType":"none","requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text"})
+        with self.assertRaises(ConflictError): self.service.set_agent_status("org_a", "user_a", agent["id"], "active")
+        self.db.execute("UPDATE agents SET last_connection_test_status='passed' WHERE id=?", (agent["id"],))
+        self.assertEqual(self.service.set_agent_status("org_a", "user_a", agent["id"], "active")["status"], "active")
+
+    def test_historical_runs_protect_agent_and_suite_from_deletion(self):
+        with patch("sentinel.service.validate_endpoint", return_value=("https://example.com", ["93.184.216.34"])):
+            agent = self.service.create_agent("org_a", "user_a", {"name":"Agent","endpointUrl":"https://example.com","authenticationType":"none","requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text"})
+        self.db.execute("UPDATE agents SET status='active' WHERE id=?", (agent["id"],)); suite = self.service.create_suite("org_a", "user_a", {"name":"Suite"})
+        self.service.start_run("org_a", "user_a", agent["id"], suite["id"])
+        with self.assertRaises(ConflictError): self.service.delete_agent("org_a", "user_a", agent["id"])
+        with self.assertRaises(ConflictError): self.service.delete_suite("org_a", "user_a", suite["id"])
 
     def test_organization_authorization(self):
         with self.assertRaises(AuthorizationError): self.service.context("user_a", "org_b")

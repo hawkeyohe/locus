@@ -88,6 +88,11 @@ Core modules:
   audit records, reports, and dashboard aggregation
 - `sentinel/server.py`: HTTP routing and static UI delivery
 
+The workspace includes saved-agent management and a deterministic test library.
+Agents can be edited, retested, enabled or disabled, and have credentials rotated
+without exposing stored values. Test suites can be created, duplicated, updated,
+and populated with editable, individually enabled checks.
+
 ## API identity
 
 Production APIs require an opaque bearer token. Only a SHA-256 token digest is
