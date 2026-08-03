@@ -42,7 +42,9 @@
       <div class="run-config panel">
         <label class="field-label" for="agent-select">Agent</label><select id="agent-select"></select>
         <label class="field-label" for="suite-select">Test suite</label><select id="suite-select"></select>
+        <div class="case-toolbar"><span id="selected-case-count">0 tests selected</span><button type="button" id="toggle-cases">Clear all</button></div>
         <div id="suite-cases" class="suite-cases"></div>
+        <div class="run-options"><div><label class="field-label" for="run-concurrency">Concurrency</label><select id="run-concurrency"><option value="1">1 request</option><option value="2" selected>2 requests</option><option value="3">3 requests</option><option value="4">4 requests</option><option value="5">5 requests</option></select></div><div><label class="field-label" for="run-timeout">Timeout per test</label><select id="run-timeout"><option value="5000">5 seconds</option><option value="10000" selected>10 seconds</option><option value="20000">20 seconds</option><option value="30000">30 seconds</option><option value="60000">60 seconds</option></select></div></div>
         <div class="run-actions"><button class="secondary-button" id="new-test">+ Custom test</button><button id="run">Start test run <span>→</span></button></div>
         <p id="run-status">Select an active agent and suite.</p>
       </div>

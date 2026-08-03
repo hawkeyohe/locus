@@ -4,6 +4,7 @@ import json
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -176,33 +177,57 @@ class LocusService:
     def start_run(self, org_id: str, user_id: str, agent_id: str, suite_id: str, configuration: dict[str, Any] | None = None) -> dict[str, Any]:
         agent = self._owned("agents", agent_id, org_id); self._owned("test_suites", suite_id, org_id)
         if agent["status"] != "active": raise ValueError("Agent must pass its connection test before a run")
+        configuration = configuration or {}; concurrency = int(configuration.get("concurrency", 1)); timeout = int(configuration.get("timeoutMs", agent["timeout_ms"])); selected = configuration.get("testCaseIds")
+        if not 1 <= concurrency <= 5: raise ValueError("Concurrency must be between 1 and 5")
+        if not 250 <= timeout <= 60000: raise ValueError("Run timeout must be between 250 and 60000 ms")
+        if selected is not None:
+            if not isinstance(selected, list) or not selected or not all(isinstance(case_id, str) for case_id in selected): raise ValueError("Select at least one valid test case")
+            available = {row["id"] for row in self.db.all("SELECT id FROM test_cases WHERE test_suite_id=? AND enabled=1", (suite_id,))}
+            if not set(selected).issubset(available): raise ValueError("Selected test cases must be enabled checks from this suite")
+            selected = list(dict.fromkeys(selected))[:self.settings.max_tests_per_run]
+        configuration = {"concurrency":concurrency,"timeoutMs":timeout,"testCaseIds":selected}
         active = self.db.one("SELECT COUNT(*) AS count FROM test_runs WHERE organization_id=? AND status IN ('queued','running')", (org_id,))
         if active and active["count"] >= self.settings.worker_concurrency * 2: raise ValueError("Organization execution limit reached; wait for an active run to finish")
         cutoff = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         recent = self.db.one("SELECT COUNT(*) AS count FROM test_runs WHERE organization_id=? AND created_at>=?", (org_id, cutoff))
         if recent and recent["count"] >= self.settings.organization_runs_per_hour: raise ValueError("Organization hourly test-run limit reached")
         baseline = self.db.one("SELECT id FROM test_runs WHERE organization_id=? AND agent_id=? AND test_suite_id=? AND status='completed' ORDER BY completed_at DESC LIMIT 1", (org_id, agent_id, suite_id))
-        run_id, timestamp = new_id("run"), now(); self.db.insert("test_runs", {"id": run_id, "organization_id": org_id, "agent_id": agent_id, "test_suite_id": suite_id, "status": "queued", "progress": 0, "overall_score": None, "security_score": None, "reliability_score": None, "compliance_score": None, "started_at": None, "completed_at": None, "duration_ms": None, "error_message": None, "configuration": encode_json(configuration or {}), "baseline_run_id": baseline["id"] if baseline else None, "created_at": timestamp, "updated_at": timestamp})
+        run_id, timestamp = new_id("run"), now(); self.db.insert("test_runs", {"id": run_id, "organization_id": org_id, "agent_id": agent_id, "test_suite_id": suite_id, "status": "queued", "progress": 0, "overall_score": None, "security_score": None, "reliability_score": None, "compliance_score": None, "started_at": None, "completed_at": None, "duration_ms": None, "error_message": None, "configuration": encode_json(configuration), "baseline_run_id": baseline["id"] if baseline else None, "created_at": timestamp, "updated_at": timestamp})
         self.audit(org_id, user_id, "run.started", "test_run", run_id); self.queue.enqueue(run_id); return decode_row(self.db.one("SELECT * FROM test_runs WHERE id=?", (run_id,))) or {}
 
     def _execute_run(self, run_id: str) -> None:
         started = time.monotonic(); run = decode_row(self.db.one("SELECT * FROM test_runs WHERE id=?", (run_id,))) or {}; agent = self._owned("agents", run["agent_id"], run["organization_id"])
+        if run.get("status") == "cancelled": return
+        configuration = run.get("configuration") or {}; selected = configuration.get("testCaseIds"); concurrency = int(configuration.get("concurrency",1)); agent = {**agent,"timeout_ms":int(configuration.get("timeoutMs",agent["timeout_ms"]))}
         cases = [decode_row(row) or {} for row in self.db.all("SELECT * FROM test_cases WHERE test_suite_id=? AND enabled=1 LIMIT ?", (run["test_suite_id"], self.settings.max_tests_per_run))]
+        if selected is not None: cases = [case for case in cases if case["id"] in set(selected)]
         self.db.execute("UPDATE test_runs SET status='running',started_at=?,updated_at=? WHERE id=?", (now(), now(), run_id))
         try:
-            for index, case in enumerate(cases):
-                if run_id in self.cancelled: self.db.execute("UPDATE test_runs SET status='cancelled',completed_at=?,updated_at=? WHERE id=?", (now(), now(), run_id)); return
-                response = self.client.send(agent, case["input"], {"session_id": new_id("session"), "test_run_id": run_id, "test_case_id": case["id"], "agent_id": agent["id"]})
-                evaluation = evaluate(case["evaluator_type"], EvaluationContext(case["input"], case["expected_behavior"], case["evaluator_config"], response.output, response.raw_response, response.http_status, response.latency_ms, response.error_message, {"attempts": response.attempts}))
-                self.db.insert("test_results", {"id": new_id("result"), "test_run_id": run_id, "test_case_id": case["id"], "status": evaluation.status, "category": case["category"], "severity": evaluation.severity, "score": evaluation.score, "input": case["input"], "expected_behavior": case["expected_behavior"], "actual_behavior": response.output, "evidence": encode_json(evaluation.evidence), "remediation": encode_json(evaluation.remediation), "latency_ms": response.latency_ms, "http_status": response.http_status, "error_type": response.error_type, "raw_response": encode_json(response.raw_response), "response_metadata": encode_json({"attempts": response.attempts}), "created_at": now()})
-                self.db.execute("UPDATE test_runs SET progress=?,updated_at=? WHERE id=?", (round(((index+1)/max(1,len(cases)))*100), now(), run_id))
+            completed = 0
+            for offset in range(0,len(cases),concurrency):
+                current = self.db.one("SELECT status FROM test_runs WHERE id=?", (run_id,))
+                if run_id in self.cancelled or current and current["status"] == "cancelled": return
+                batch = cases[offset:offset+concurrency]
+                with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                    futures = {executor.submit(self._execute_case,agent,run_id,case):case for case in batch}
+                    for future in as_completed(futures):
+                        case, response, evaluation = future.result(); completed += 1
+                        self.db.insert("test_results", {"id": new_id("result"), "test_run_id": run_id, "test_case_id": case["id"], "status": evaluation.status, "category": case["category"], "severity": evaluation.severity, "score": evaluation.score, "input": case["input"], "expected_behavior": case["expected_behavior"], "actual_behavior": response.output, "evidence": encode_json(evaluation.evidence), "remediation": encode_json(evaluation.remediation), "latency_ms": response.latency_ms, "http_status": response.http_status, "error_type": response.error_type, "raw_response": encode_json(response.raw_response), "response_metadata": encode_json({"attempts": response.attempts}), "created_at": now()})
+                        self.db.execute("UPDATE test_runs SET progress=?,updated_at=? WHERE id=?", (round((completed/max(1,len(cases)))*100), now(), run_id))
+                current = self.db.one("SELECT status FROM test_runs WHERE id=?", (run_id,))
+                if current and current["status"] == "cancelled": return
             results = [decode_row(row) or {} for row in self.db.all("SELECT * FROM test_results WHERE test_run_id=?", (run_id,))]; scores = calculate_scores(results)
             self.db.execute("UPDATE test_runs SET status='completed',progress=100,overall_score=?,security_score=?,reliability_score=?,compliance_score=?,completed_at=?,duration_ms=?,updated_at=? WHERE id=?", (scores["overallScore"], scores["securityScore"], scores["reliabilityScore"], scores["complianceScore"], now(), round((time.monotonic()-started)*1000), now(), run_id))
         except Exception as exc:
             self.db.execute("UPDATE test_runs SET status='failed',error_message=?,completed_at=?,updated_at=? WHERE id=?", (str(exc), now(), now(), run_id))
 
+    def _execute_case(self, agent: dict[str, Any], run_id: str, case: dict[str, Any]) -> tuple[Any, Any, Any]:
+        response = self.client.send(agent, case["input"], {"session_id": new_id("session"), "test_run_id": run_id, "test_case_id": case["id"], "agent_id": agent["id"]})
+        evaluation = evaluate(case["evaluator_type"], EvaluationContext(case["input"], case["expected_behavior"], case["evaluator_config"], response.output, response.raw_response, response.http_status, response.latency_ms, response.error_message, {"attempts": response.attempts}))
+        return case, response, evaluation
+
     def cancel_run(self, org_id: str, user_id: str, run_id: str) -> None:
-        self._owned("test_runs", run_id, org_id); self.cancelled.add(run_id); self.queue.cancel(run_id); self.db.execute("UPDATE test_runs SET status='cancelled',completed_at=?,updated_at=? WHERE id=? AND status='queued'", (now(),now(),run_id)); self.audit(org_id, user_id, "run.cancelled", "test_run", run_id)
+        self._owned("test_runs", run_id, org_id); self.cancelled.add(run_id); self.queue.cancel(run_id); self.db.execute("UPDATE test_runs SET status='cancelled',completed_at=?,updated_at=? WHERE id=? AND status IN ('queued','running')", (now(),now(),run_id)); self.audit(org_id, user_id, "run.cancelled", "test_run", run_id)
 
     def get_run(self, org_id: str, run_id: str) -> dict[str, Any]:
         run = self._owned("test_runs", run_id, org_id); run["results"] = [decode_row(row) for row in self.db.all("SELECT r.*,c.name AS test_name FROM test_results r JOIN test_cases c ON c.id=r.test_case_id WHERE r.test_run_id=? ORDER BY r.created_at", (run_id,))]; return run

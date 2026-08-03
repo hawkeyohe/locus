@@ -72,6 +72,34 @@ class PlatformTests(unittest.TestCase):
         with self.assertRaises(ConflictError): self.service.delete_agent("org_a", "user_a", agent["id"])
         with self.assertRaises(ConflictError): self.service.delete_suite("org_a", "user_a", suite["id"])
 
+    def test_run_configuration_selects_cases_and_applies_timeout(self):
+        response = AgentResponse("ok", {"response":{"text":"ok"}}, 200, 5)
+        with patch("sentinel.service.validate_endpoint", return_value=("https://example.com", ["93.184.216.34"])):
+            agent = self.service.create_agent("org_a", "user_a", {"name":"Agent","endpointUrl":"https://example.com","authenticationType":"none","requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text","timeoutMs":10000})
+        self.db.execute("UPDATE agents SET status='active' WHERE id=?", (agent["id"],)); suite = self.service.create_suite("org_a", "user_a", {"name":"Suite"})
+        first = self.service.create_case("org_a","user_a",suite["id"], {"name":"First","category":"reliability","defaultSeverity":"medium","input":"first","expectedBehavior":"Respond","evaluatorType":"non_empty_response","evaluatorConfig":{},"timeoutMs":10000})
+        self.service.create_case("org_a","user_a",suite["id"], {"name":"Second","category":"reliability","defaultSeverity":"medium","input":"second","expectedBehavior":"Respond","evaluatorType":"non_empty_response","evaluatorConfig":{},"timeoutMs":10000})
+        with patch.object(self.service.client, "send", return_value=response) as sender:
+            run = self.service.start_run("org_a","user_a",agent["id"],suite["id"], {"concurrency":2,"timeoutMs":5000,"testCaseIds":[first["id"]]})
+            Worker(self.service.queue, self.service._execute_run, self.settings, "configured-worker").run_once()
+        finished = self.service.get_run("org_a", run["id"]); self.assertEqual((finished["status"],len(finished["results"])), ("completed",1)); self.assertEqual(sender.call_args.args[0]["timeout_ms"], 5000)
+
+    def test_run_configuration_rejects_invalid_case_selection(self):
+        with patch("sentinel.service.validate_endpoint", return_value=("https://example.com", ["93.184.216.34"])):
+            agent = self.service.create_agent("org_a", "user_a", {"name":"Agent","endpointUrl":"https://example.com","authenticationType":"none","requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text"})
+        self.db.execute("UPDATE agents SET status='active' WHERE id=?", (agent["id"],)); suite = self.service.create_suite("org_a", "user_a", {"name":"Suite"})
+        with self.assertRaises(ValueError): self.service.start_run("org_a","user_a",agent["id"],suite["id"], {"concurrency":6,"testCaseIds":["case_not_owned"]})
+        with self.assertRaises(ValueError): self.service.start_run("org_a","user_a",agent["id"],suite["id"], {"concurrency":1,"testCaseIds":[]})
+
+    def test_cancelled_run_does_not_start_and_preserves_cancelled_status(self):
+        with patch("sentinel.service.validate_endpoint", return_value=("https://example.com", ["93.184.216.34"])):
+            agent = self.service.create_agent("org_a", "user_a", {"name":"Agent","endpointUrl":"https://example.com","authenticationType":"none","requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text"})
+        self.db.execute("UPDATE agents SET status='active' WHERE id=?", (agent["id"],)); suite = self.service.create_suite("org_a", "user_a", {"name":"Suite"})
+        self.service.create_case("org_a","user_a",suite["id"], {"name":"Check","category":"reliability","defaultSeverity":"medium","input":"hello","expectedBehavior":"Respond","evaluatorType":"non_empty_response","evaluatorConfig":{},"timeoutMs":10000})
+        run = self.service.start_run("org_a","user_a",agent["id"],suite["id"]); self.service.cancel_run("org_a","user_a",run["id"])
+        with patch.object(self.service.client, "send") as sender: self.service._execute_run(run["id"])
+        self.assertEqual(self.service.get_run("org_a",run["id"])["status"], "cancelled"); sender.assert_not_called()
+
     def test_organization_authorization(self):
         with self.assertRaises(AuthorizationError): self.service.context("user_a", "org_b")
 

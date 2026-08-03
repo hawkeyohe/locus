@@ -91,7 +91,10 @@ Core modules:
 The workspace includes saved-agent management and a deterministic test library.
 Agents can be edited, retested, enabled or disabled, and have credentials rotated
 without exposing stored values. Test suites can be created, duplicated, updated,
-and populated with editable, individually enabled checks.
+and populated with editable, individually enabled checks. Each run can select a
+subset of enabled checks, set bounded request concurrency and timeout overrides,
+stream stored partial results through polling, and cooperatively cancel remaining
+work without discarding completed evidence.
 
 ## API identity
 
