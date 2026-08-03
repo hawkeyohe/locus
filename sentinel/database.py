@@ -94,6 +94,9 @@ class Database:
         sql = f"INSERT INTO {table} ({','.join(keys)}) VALUES ({','.join('?' for _ in keys)})"
         self.execute(sql, tuple(data[key] for key in keys))
 
+    def ping(self) -> bool:
+        return bool(self.one("SELECT 1 AS ok"))
+
 
 JSON_FIELDS = {"request_template", "request_headers", "evaluator_config", "configuration", "evidence", "remediation", "raw_response", "response_metadata", "metadata"}
 

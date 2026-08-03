@@ -9,6 +9,7 @@ from typing import Callable
 
 from .config import Settings
 from .database import Database, new_id, now
+from .observability import log_event
 
 
 class DurableJobQueue:
@@ -72,6 +73,7 @@ class Worker:
     def run_once(self) -> bool:
         job = self.queue.claim(self.worker_id)
         if not job: return False
+        log_event("job_started",worker_id=self.worker_id,job_id=job["id"],run_id=job["run_id"],attempt=job["attempts"])
         heartbeat_stop = threading.Event()
         heartbeat_error: list[Exception] = []
         def renew() -> None:
@@ -84,8 +86,10 @@ class Worker:
             self.handler(job["run_id"])
             if heartbeat_error: raise heartbeat_error[0]
             self.queue.complete(job["id"], self.worker_id)
+            log_event("job_completed",worker_id=self.worker_id,job_id=job["id"],run_id=job["run_id"],attempt=job["attempts"])
         except Exception as exc:
             self.queue.fail(job, self.worker_id, str(exc))
+            log_event("job_failed",worker_id=self.worker_id,job_id=job["id"],run_id=job["run_id"],attempt=job["attempts"],error_type=type(exc).__name__)
         finally:
             heartbeat_stop.set(); heartbeat.join(timeout=1)
         return True

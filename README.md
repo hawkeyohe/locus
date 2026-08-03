@@ -44,6 +44,19 @@ separate processes backed by the shared database:
 .venv/bin/python -m scripts.worker
 ```
 
+## Containers
+
+For a production-shaped local environment with PostgreSQL and a separate worker:
+
+```bash
+docker compose up --build
+```
+
+The Compose stack includes PostgreSQL with persistent storage, a one-shot migration
+service, the web service, and a standalone durable worker. Its checked-in database
+password and development encryption key are local-only defaults; replace them with
+managed secrets in any shared environment.
+
 ## Architecture
 
 ```text
@@ -145,6 +158,23 @@ the agent connectivity service.
 .venv/bin/python -m unittest discover -s tests -v
 node --check web/app.js
 ```
+
+GitHub Actions runs installation, migrations, Python compilation, all automated
+tests, and frontend JavaScript validation for pull requests and pushes to `main`.
+
+## Health and observability
+
+- `GET /health/live` confirms the process is serving requests.
+- `GET /health/ready` verifies database connectivity and returns `503` when the
+  service should not receive traffic.
+- `GET /metrics` exposes request totals, request-duration aggregates, and job counts
+  in Prometheus text format. Restrict this endpoint to the monitoring network in
+  production.
+- Every response includes `X-Request-ID`; safe incoming IDs are preserved.
+- Logs are newline-delimited JSON and include request ID, normalized route, status,
+  duration, and client address without query strings or authorization headers.
+- Responses include CSP, clickjacking, MIME-sniffing, referrer, permissions-policy,
+  and production HSTS headers.
 
 The suite covers template substitution, response paths, credential encryption and
 masking, organization isolation, SSRF policy, redaction, deterministic evaluators,

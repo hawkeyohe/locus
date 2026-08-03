@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = ["cryptography>=42,<46", "psycopg[binary]>=3.2,<4"]
 
 [tool.setuptools]
-packages = ["sentinel"]
+packages = ["sentinel", "scripts"]
 
 [tool.setuptools.package-data]
 sentinel = ["migrations/*.sql"]

@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.env
+locus.db*
+tests
+coverage.xml
+.coverage

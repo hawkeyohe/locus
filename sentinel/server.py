@@ -12,13 +12,13 @@ from .config import settings
 from .database import Database
 from .limits import RateLimitError, SlidingWindowLimiter
 from .jobs import Worker
+from .observability import Metrics, log_event, request_id, route_name
 from .security import CredentialVault
 from .seed import DEMO_ORG_ID, DEMO_USER_ID, seed_demo
 from .service import AuthorizationError, LocusService, NotFoundError
 
 
-ROOT = Path(__file__).resolve().parent.parent
-STATIC = ROOT / "web"
+STATIC = settings.static_dir
 settings.validate()
 DB = Database(settings.database_dsn)
 VAULT = CredentialVault(settings.encryption_key)
@@ -26,6 +26,7 @@ SERVICE = LocusService(DB, settings, VAULT)
 EMBEDDED_WORKER = Worker(SERVICE.queue, SERVICE._execute_run, settings, "embedded")
 TOKENS = TokenService(DB)
 LIMITER = SlidingWindowLimiter()
+METRICS = Metrics()
 if settings.demo_seed:
     seed_demo(DB, settings, VAULT)
 
@@ -47,8 +48,19 @@ def mock_agent(message: str) -> tuple[int, object, float]:
 class Handler(BaseHTTPRequestHandler):
     server_version = "Locus/0.2"
 
+    def end_headers(self) -> None:
+        self.send_header("X-Request-ID", getattr(self, "request_id", "unknown"))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+        if settings.environment == "production": self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        super().end_headers()
+
     def _json(self, payload: object, status: int = 200) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode()
+        self.response_status = status
         self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
 
     def _body(self) -> dict:
@@ -68,6 +80,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str) -> None:
         parsed = urlparse(self.path); path = parsed.path.rstrip("/") or "/"; parts = path.strip("/").split("/")
+        if path == "/health/live" and method == "GET": return self._json({"status":"ok","service":"locus"})
+        if path == "/health/ready" and method == "GET":
+            ready = DB.ping(); return self._json({"status":"ready" if ready else "unavailable","database":ready}, 200 if ready else 503)
+        if path == "/metrics" and method == "GET":
+            counts = {row["status"]: row["count"] for row in DB.all("SELECT status,COUNT(*) AS count FROM jobs GROUP BY status")}
+            body = METRICS.render(counts); self.response_status = 200; self.send_response(200); self.send_header("Content-Type","text/plain; version=0.0.4"); self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body); return
+        if not path.startswith("/api/") and method == "GET": return self._static(path)
         LIMITER.check(f"ip:{self.client_address[0]}", settings.api_requests_per_minute)
         if path == "/api/dev/mock-agent" and method == "POST" and settings.demo_seed:
             data = self._body(); message = str(data.get("message", "")); status, payload, delay = mock_agent(message); time.sleep(delay)
@@ -116,14 +135,14 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"error": "Not found"}, 404)
 
     def do_GET(self) -> None:
-        if self.path.startswith("/api/"): self._safe("GET")
-        else: self._static(urlparse(self.path).path)
+        self._safe("GET")
     def do_POST(self) -> None: self._safe("POST")
     def do_PATCH(self) -> None: self._safe("PATCH")
     def do_PUT(self) -> None: self._safe("PUT")
     def do_DELETE(self) -> None: self._safe("DELETE")
 
     def _safe(self, method: str) -> None:
+        self.request_id = request_id(self.headers.get("X-Request-ID")); self.response_status = 500; started = time.monotonic()
         try: self._handle(method)
         except AuthenticationError as exc: self._json({"error": str(exc)}, 401)
         except AuthorizationError as exc: self._json({"error": str(exc)}, 403)
@@ -131,18 +150,21 @@ class Handler(BaseHTTPRequestHandler):
         except NotFoundError as exc: self._json({"error": str(exc)}, 404)
         except (ValueError, KeyError, json.JSONDecodeError) as exc: self._json({"error": str(exc)}, 400)
         except Exception as exc: self._json({"error": "Internal server error", "detail": str(exc) if settings.demo_seed else None}, 500)
+        finally:
+            duration = time.monotonic()-started; route = route_name(self.path); METRICS.observe_request(method,route,self.response_status,duration)
+            log_event("http_request",request_id=self.request_id,method=method,path=urlparse(self.path).path,route=route,status=self.response_status,duration_ms=round(duration*1000,2),client=self.client_address[0])
 
     def _static(self, path: str) -> None:
         relative = "index.html" if path == "/" else path.lstrip("/"); target = (STATIC / relative).resolve()
-        if STATIC.resolve() not in target.parents or not target.is_file(): self.send_error(404); return
-        body = target.read_bytes(); self.send_response(200); self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "application/octet-stream"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+        if STATIC.resolve() not in target.parents or not target.is_file(): self.response_status = 404; self.send_error(404); return
+        body = target.read_bytes(); self.response_status = 200; self.send_response(200); self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "application/octet-stream"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
     def log_message(self, format: str, *args) -> None:
-        print(f"[locus] {self.command} {urlparse(self.path).path} - {format % args}")
+        return
 
 
 def main() -> None:
-    server = ThreadingHTTPServer(("127.0.0.1", settings.port), Handler)
+    server = ThreadingHTTPServer((settings.host, settings.port), Handler)
     worker_thread = EMBEDDED_WORKER.start_thread() if settings.embedded_worker else None
     print(f"Locus running at http://localhost:{settings.port}")
     try: server.serve_forever()
