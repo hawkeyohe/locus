@@ -142,9 +142,21 @@ class PlatformTests(unittest.TestCase):
         result = evaluate("must_not_contain", EvaluationContext(evaluator_config={"values":["secret"],"severity":"high"}, agent_output="the secret is x", **base)); self.assertEqual((result.status,result.severity), ("failed","high"))
 
     def test_scoring_and_regression(self):
-        current = [{"test_case_id":"1","status":"failed","severity":"critical","category":"prompt_injection","latency_ms":200}]
-        baseline = [{"test_case_id":"1","status":"passed","severity":"informational","category":"prompt_injection","latency_ms":100}]
-        self.assertEqual(calculate_scores(current)["overallScore"], 70); comparison = compare_results(current, baseline, 70, 100); self.assertEqual(comparison["newCriticalFindings"], 1); self.assertEqual(comparison["latencyChangePercent"], 100)
+        current = [{"test_case_id":"1","status":"failed","severity":"critical","category":"prompt_injection","latency_ms":200},{"test_case_id":"2","status":"passed","severity":"informational","category":"business_rule","latency_ms":100}]
+        baseline = [{"test_case_id":"1","status":"passed","severity":"informational","category":"prompt_injection","latency_ms":100},{"test_case_id":"2","status":"failed","severity":"high","category":"business_rule","latency_ms":100}]
+        self.assertEqual(calculate_scores(current)["overallScore"], 70); comparison = compare_results(current, baseline, 70, 85)
+        self.assertEqual((comparison["newCriticalFindings"], comparison["resolvedFailures"]), (1, 1)); self.assertEqual(comparison["latencyChangePercent"], 50)
+        self.assertEqual((comparison["severityIncreases"], comparison["severityDecreases"]), (1, 1)); self.assertEqual(comparison["categoryScoreChanges"], {"business_rule":15.0,"prompt_injection":-30.0})
+
+    def test_comparison_rejects_incompatible_baseline(self):
+        timestamp = now()
+        with patch("sentinel.service.validate_endpoint", return_value=("https://example.com", ["93.184.216.34"])):
+            agent_a = self.service.create_agent("org_a", "user_a", {"name":"A","endpointUrl":"https://example.com","authenticationType":"none","requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text"})
+            agent_b = self.service.create_agent("org_a", "user_a", {"name":"B","endpointUrl":"https://example.com","authenticationType":"none","requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text"})
+        suite = self.service.create_suite("org_a", "user_a", {"name":"Suite"})
+        base = {"organization_id":"org_a","test_suite_id":suite["id"],"status":"completed","progress":100,"overall_score":100,"security_score":100,"reliability_score":100,"compliance_score":100,"started_at":timestamp,"completed_at":timestamp,"duration_ms":10,"error_message":None,"configuration":"{}","baseline_run_id":None,"created_at":timestamp,"updated_at":timestamp}
+        self.db.insert("test_runs", {"id":"run_current","agent_id":agent_a["id"],**base}); self.db.insert("test_runs", {"id":"run_other_agent","agent_id":agent_b["id"],**base})
+        with self.assertRaises(ValueError): self.service.comparison("org_a", "run_current", "run_other_agent")
 
     def test_end_to_end_agent_run_report_and_export_shape(self):
         safe_response = AgentResponse("I cannot provide private information.", {"response":{"text":"I cannot provide private information."},"token":"[REDACTED]"}, 200, 12)

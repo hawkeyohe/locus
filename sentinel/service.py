@@ -214,6 +214,7 @@ class LocusService:
         run = self._owned("test_runs", run_id, org_id); baseline_id = baseline_id or run.get("baseline_run_id")
         if not baseline_id: return {"available": False}
         baseline = self._owned("test_runs", baseline_id, org_id); current_results = [decode_row(r) or {} for r in self.db.all("SELECT * FROM test_results WHERE test_run_id=?", (run_id,))]; baseline_results = [decode_row(r) or {} for r in self.db.all("SELECT * FROM test_results WHERE test_run_id=?", (baseline_id,))]
+        if baseline_id == run_id or baseline["status"] != "completed" or baseline["agent_id"] != run["agent_id"] or baseline["test_suite_id"] != run["test_suite_id"]: raise ValueError("Baseline must be a different completed run for the same agent and test suite")
         return {"available": True, "baselineRunId": baseline_id, **compare_results(current_results, baseline_results, run.get("overall_score") or 0, baseline.get("overall_score") or 0)}
 
     def report(self, org_id: str, run_id: str) -> dict[str, Any]:
@@ -223,4 +224,8 @@ class LocusService:
 
     def dashboard(self, org_id: str) -> dict[str, Any]:
         agents = self.list_agents(org_id); runs = self.list_runs(org_id); completed = [r for r in runs if r["status"] == "completed"]; results = self.db.all("SELECT tr.status,tr.severity,tr.category FROM test_results tr JOIN test_runs r ON r.id=tr.test_run_id WHERE r.organization_id=?", (org_id,))
-        return {"totalAgents": len(agents), "activeAgents": sum(a["status"] == "active" for a in agents), "totalRuns": len(runs), "averageScore": round(sum(r["overall_score"] or 0 for r in completed)/max(1,len(completed)),1), "failedTests": sum(r["status"] == "failed" for r in results), "criticalFindings": sum(r["severity"] == "critical" and r["status"] == "failed" for r in results), "recentRuns": runs[:10], "scoreTrend": [{"runId": r["id"], "score": r["overall_score"], "createdAt": r["created_at"]} for r in reversed(completed[:10])], "findingsBySeverity": {s: sum(r["severity"] == s for r in results) for s in ("critical","high","medium","low")}, "findingsByCategory": {c: sum(r["category"] == c for r in results) for c in sorted({r["category"] for r in results})}}
+        findings = [r for r in results if r["status"] in {"failed", "warning", "error"}]; regressions = []
+        for run in completed[:10]:
+            if not run.get("baseline_run_id"): continue
+            comparison = self.comparison(org_id, run["id"]); regressions.append({"runId":run["id"],"agentName":run["agent_name"],"suiteName":run["suite_name"],"createdAt":run["created_at"],**comparison})
+        return {"totalAgents": len(agents), "activeAgents": sum(a["status"] == "active" for a in agents), "totalRuns": len(runs), "averageScore": round(sum(r["overall_score"] or 0 for r in completed)/max(1,len(completed)),1), "failedTests": sum(r["status"] == "failed" for r in results), "criticalFindings": sum(r["severity"] == "critical" and r["status"] == "failed" for r in results), "recentRuns": runs[:10], "scoreTrend": [{"runId": r["id"], "score": r["overall_score"], "createdAt": r["created_at"], "agentName":r["agent_name"]} for r in reversed(completed[:10])], "findingsBySeverity": {s: sum(r["severity"] == s for r in findings) for s in ("critical","high","medium","low","informational")}, "findingsByCategory": {c: sum(r["category"] == c for r in findings) for c in sorted({r["category"] for r in findings})}, "recentRegressions":regressions}
