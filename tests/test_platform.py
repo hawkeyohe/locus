@@ -137,7 +137,7 @@ class PlatformTests(unittest.TestCase):
     def test_production_configuration_rejects_unsafe_defaults(self):
         unsafe = Settings(environment="production", encryption_key="development-only-change-me", demo_seed=False, allow_local_endpoints=False)
         with self.assertRaises(ValueError): unsafe.validate()
-        safe = Settings(environment="production", encryption_key=self.key, demo_seed=False, allow_local_endpoints=False, embedded_worker=False, database_url="postgresql://user:password@db/locus")
+        safe = Settings(environment="production", encryption_key=self.key, demo_seed=False, allow_local_endpoints=False, embedded_worker=False, database_url="postgresql://user:password@db/locus",metrics_token="metrics-secret")
         safe.validate()
 
     def test_sliding_window_rate_limit(self):

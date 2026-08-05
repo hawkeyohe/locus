@@ -1,0 +1,72 @@
+databases:
+  - name: locus-postgres
+    databaseName: locus
+    user: locus
+    ipAllowList: []
+
+services:
+  - type: web
+    name: locus-staging
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python -m sentinel.server
+    preDeployCommand: python -m scripts.migrate
+    healthCheckPath: /health/ready
+    envVars:
+      - key: LOCUS_ENV
+        value: production
+      - key: LOCUS_DATABASE_URL
+        fromDatabase:
+          name: locus-postgres
+          property: connectionString
+      - key: LOCUS_ENCRYPTION_KEY
+        generateValue: true
+      - key: LOCUS_METRICS_TOKEN
+        generateValue: true
+      - key: LOCUS_APP_URL
+        value: https://locus-staging.onrender.com
+      - key: LOCUS_HOST
+        value: 0.0.0.0
+      - key: LOCUS_PORT
+        value: "8000"
+      - key: LOCUS_DEMO_SEED
+        value: "false"
+      - key: LOCUS_ALLOW_LOCAL_ENDPOINTS
+        value: "false"
+      - key: LOCUS_EMBEDDED_WORKER
+        value: "false"
+      - key: LOCUS_WORKER_CONCURRENCY
+        value: "2"
+
+  - type: worker
+    name: locus-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python -m scripts.worker
+    envVars:
+      - key: LOCUS_ENV
+        value: production
+      - key: LOCUS_DATABASE_URL
+        fromDatabase:
+          name: locus-postgres
+          property: connectionString
+      - key: LOCUS_ENCRYPTION_KEY
+        fromService:
+          type: web
+          name: locus-staging
+          envVarKey: LOCUS_ENCRYPTION_KEY
+      - key: LOCUS_METRICS_TOKEN
+        fromService:
+          type: web
+          name: locus-staging
+          envVarKey: LOCUS_METRICS_TOKEN
+      - key: LOCUS_APP_URL
+        value: https://locus-staging.onrender.com
+      - key: LOCUS_DEMO_SEED
+        value: "false"
+      - key: LOCUS_ALLOW_LOCAL_ENDPOINTS
+        value: "false"
+      - key: LOCUS_EMBEDDED_WORKER
+        value: "false"
+      - key: LOCUS_WORKER_CONCURRENCY
+        value: "2"

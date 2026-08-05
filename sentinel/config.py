@@ -48,6 +48,7 @@ class Settings:
     max_redirects: int = int(os.getenv("LOCUS_MAX_REDIRECTS", "0"))
     api_requests_per_minute: int = int(os.getenv("LOCUS_API_REQUESTS_PER_MINUTE", "120"))
     auth_attempts_per_minute: int = int(os.getenv("LOCUS_AUTH_ATTEMPTS_PER_MINUTE", "10"))
+    metrics_token: str = os.getenv("LOCUS_METRICS_TOKEN", "")
     organization_requests_per_minute: int = int(os.getenv("LOCUS_ORG_REQUESTS_PER_MINUTE", "300"))
     organization_runs_per_hour: int = int(os.getenv("LOCUS_ORG_RUNS_PER_HOUR", "30"))
     embedded_worker: bool = _bool("LOCUS_EMBEDDED_WORKER", True)
@@ -71,6 +72,8 @@ class Settings:
                 raise ValueError("Production requires LOCUS_DATABASE_URL with PostgreSQL")
             if not self.encryption_key or self.encryption_key == "development-only-change-me":
                 raise ValueError("A production LOCUS_ENCRYPTION_KEY is required")
+            if not self.metrics_token:
+                raise ValueError("A production LOCUS_METRICS_TOKEN is required")
 
 
 settings = Settings()

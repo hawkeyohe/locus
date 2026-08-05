@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import signal
 import time
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -96,6 +97,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health/ready" and method == "GET":
             ready = DB.ping(); return self._json({"status":"ready" if ready else "unavailable","database":ready}, 200 if ready else 503)
         if path == "/metrics" and method == "GET":
+            if settings.metrics_token and self.headers.get("Authorization") != f"Bearer {settings.metrics_token}": raise AuthenticationError("Metrics authentication is required")
             counts = {row["status"]: row["count"] for row in DB.all("SELECT status,COUNT(*) AS count FROM jobs GROUP BY status")}
             body = METRICS.render(counts); self.response_status = 200; self.send_response(200); self.send_header("Content-Type","text/plain; version=0.0.4"); self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body); return
         if not path.startswith("/api/") and method == "GET": return self._static(path)
@@ -192,6 +194,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     server = ThreadingHTTPServer((settings.host, settings.port), Handler)
+    def terminate(*_: object) -> None: raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM,terminate)
     worker_thread = EMBEDDED_WORKER.start_thread() if settings.embedded_worker else None
     print(f"Locus running at http://localhost:{settings.port}")
     try: server.serve_forever()

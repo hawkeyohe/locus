@@ -57,6 +57,26 @@ service, the web service, and a standalone durable worker. Its checked-in databa
 password and development encryption key are local-only defaults; replace them with
 managed secrets in any shared environment.
 
+## Render staging deployment
+
+The repository includes `render.yaml`, which provisions a private-network
+PostgreSQL database, a public web service, and a separate background worker. It
+also runs migrations before each web deployment and generates independent
+encryption and metrics-access secrets.
+
+1. Merge the deployment branch into `main`.
+2. In Render, create a new Blueprint and connect `hawkeyohe/locus`.
+3. Review the selected service and database plans before applying the Blueprint.
+4. After deployment, open `https://locus-staging.onrender.com/health/ready` and
+   confirm the database reports ready.
+5. Open the staging URL, create the first owner account, and complete the
+   agent-to-report smoke test.
+
+If Render assigns a different hostname because the service name is already in
+use, update `LOCUS_APP_URL` to the actual HTTPS service URL. Do not rotate
+`LOCUS_ENCRYPTION_KEY` after storing agent credentials or request headers unless
+the encrypted data is migrated to the new key first.
+
 ## Architecture
 
 ```text
@@ -181,8 +201,8 @@ tests, and frontend JavaScript validation for pull requests and pushes to `main`
 - `GET /health/ready` verifies database connectivity and returns `503` when the
   service should not receive traffic.
 - `GET /metrics` exposes request totals, request-duration aggregates, and job counts
-  in Prometheus text format. Restrict this endpoint to the monitoring network in
-  production.
+  in Prometheus text format. Production requires `Authorization: Bearer` with the
+  generated `LOCUS_METRICS_TOKEN`.
 - Every response includes `X-Request-ID`; safe incoming IDs are preserved.
 - Logs are newline-delimited JSON and include request ID, normalized route, status,
   duration, and client address without query strings or authorization headers.
