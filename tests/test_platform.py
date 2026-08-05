@@ -140,6 +140,18 @@ class PlatformTests(unittest.TestCase):
         safe = Settings(environment="production", encryption_key=self.key, demo_seed=False, allow_local_endpoints=False, embedded_worker=False, database_url="postgresql://user:password@db/locus",metrics_token="metrics-secret")
         safe.validate()
 
+        single_service = Settings(
+            environment="production",
+            encryption_key=self.key,
+            demo_seed=False,
+            allow_local_endpoints=False,
+            embedded_worker=True,
+            single_service_mode=True,
+            database_url="postgresql://user:password@db/locus",
+            metrics_token="metrics-secret",
+        )
+        single_service.validate()
+
     def test_sliding_window_rate_limit(self):
         limiter = SlidingWindowLimiter(); limiter.check("org:a", 2); limiter.check("org:a", 2)
         with self.assertRaises(RateLimitError): limiter.check("org:a", 2)

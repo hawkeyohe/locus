@@ -52,6 +52,7 @@ class Settings:
     organization_requests_per_minute: int = int(os.getenv("LOCUS_ORG_REQUESTS_PER_MINUTE", "300"))
     organization_runs_per_hour: int = int(os.getenv("LOCUS_ORG_RUNS_PER_HOUR", "30"))
     embedded_worker: bool = _bool("LOCUS_EMBEDDED_WORKER", True)
+    single_service_mode: bool = _bool("LOCUS_SINGLE_SERVICE_MODE", False)
     job_poll_interval_ms: int = int(os.getenv("LOCUS_JOB_POLL_INTERVAL_MS", "500"))
     job_lease_seconds: int = int(os.getenv("LOCUS_JOB_LEASE_SECONDS", "60"))
     job_max_attempts: int = int(os.getenv("LOCUS_JOB_MAX_ATTEMPTS", "3"))
@@ -66,8 +67,10 @@ class Settings:
         if self.environment == "production":
             if self.demo_seed or self.allow_local_endpoints:
                 raise ValueError("Demo seed and local endpoints must be disabled in production")
-            if self.embedded_worker:
-                raise ValueError("The embedded worker must be disabled in production")
+            if self.embedded_worker and not self.single_service_mode:
+                raise ValueError(
+                    "The embedded worker requires LOCUS_SINGLE_SERVICE_MODE in production"
+                )
             if not self.database_url.startswith(("postgres://", "postgresql://")):
                 raise ValueError("Production requires LOCUS_DATABASE_URL with PostgreSQL")
             if not self.encryption_key or self.encryption_key == "development-only-change-me":

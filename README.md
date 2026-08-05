@@ -59,17 +59,20 @@ managed secrets in any shared environment.
 
 ## Render staging deployment
 
-The repository includes `render.yaml`, which provisions a private-network
-PostgreSQL database, a public web service, and a separate background worker. It
-also runs migrations before each web deployment and generates independent
-encryption and metrics-access secrets.
+The repository includes `render.yaml`, which provisions one free public web
+service backed by an external PostgreSQL database such as Neon. To fit Render's
+free tier, the service runs the durable worker in-process with controlled
+concurrency. The database-backed queue preserves queued work across service
+restarts; upgrade to a standalone worker before depending on production SLAs.
 
 1. Merge the deployment branch into `main`.
 2. In Render, create a new Blueprint and connect `hawkeyohe/locus`.
-3. Review the selected service and database plans before applying the Blueprint.
-4. After deployment, open `https://locus-staging.onrender.com/health/ready` and
+3. When prompted for `LOCUS_DATABASE_URL`, paste the pooled Neon connection
+   string. Render stores it as a secret and does not commit it to the repository.
+4. Confirm that the web service plan is Free, then apply the Blueprint.
+5. After deployment, open `https://locus-staging.onrender.com/health/ready` and
    confirm the database reports ready.
-5. Open the staging URL, create the first owner account, and complete the
+6. Open the staging URL, create the first owner account, and complete the
    agent-to-report smoke test.
 
 If Render assigns a different hostname because the service name is already in
