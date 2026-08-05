@@ -2,5 +2,5 @@
 from sentinel.config import settings
 from sentinel.database import Database
 
-Database(settings.database_path)
-print(f"Schema ready: {settings.database_path}")
+Database(settings.database_dsn)
+print("Schema ready")

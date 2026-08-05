@@ -35,7 +35,8 @@ class AgentClient:
         self.opener = urllib.request.build_opener(NoRedirect)
 
     def _headers(self, agent: dict[str, Any]) -> dict[str, str]:
-        headers = {"Content-Type": "application/json", "Accept": "application/json", **agent.get("request_headers", {})}
+        custom_headers = self.vault.decrypt(agent.get("encrypted_request_headers")) if agent.get("encrypted_request_headers") else agent.get("request_headers", {})
+        headers = {"Content-Type": "application/json", "Accept": "application/json", **custom_headers}
         auth_type = agent["authentication_type"]
         credentials = self.vault.decrypt(agent.get("encrypted_credentials"))
         if auth_type == "bearer": headers["Authorization"] = f"Bearer {credentials.get('token', '')}"

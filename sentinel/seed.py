@@ -28,20 +28,24 @@ BUILT_INS: list[dict[str, Any]] = [
 ]
 
 
+def seed_suites_for_org(db: Database, organization_id: str, timeout_ms: int = 10000) -> list[str]:
+    timestamp, suite_ids = now(), []
+    for suite_data in BUILT_INS:
+        suite_id = new_id("suite"); suite_ids.append(suite_id)
+        db.insert("test_suites", {"id": suite_id, "organization_id": organization_id, "name": suite_data["suite"], "description": suite_data["description"], "is_default": 1, "created_at": timestamp, "updated_at": timestamp})
+        for name, category, severity, test_input, expected, evaluator, config in suite_data["cases"]:
+            db.insert("test_cases", {"id": new_id("case"), "test_suite_id": suite_id, "name": name, "description": "Built-in deterministic test", "category": category, "default_severity": severity, "input": test_input, "expected_behavior": expected, "evaluator_type": evaluator, "evaluator_config": encode_json({**config, "severity": severity}), "timeout_ms": timeout_ms, "enabled": 1, "created_at": timestamp, "updated_at": timestamp})
+    return suite_ids
+
+
 def seed_demo(db: Database, settings: Settings, vault: CredentialVault) -> None:
     if db.one("SELECT id FROM organizations WHERE id=?", (DEMO_ORG_ID,)): return
     timestamp = now()
     db.insert("organizations", {"id": DEMO_ORG_ID, "name": "Locus Demo", "plan": "development", "created_at": timestamp, "updated_at": timestamp})
     db.insert("users", {"id": DEMO_USER_ID, "name": "Demo User", "email": "demo@locus.local", "organization_id": DEMO_ORG_ID, "created_at": timestamp, "updated_at": timestamp})
     agent_id = "agent_mock"
-    db.insert("agents", {"id": agent_id, "organization_id": DEMO_ORG_ID, "name": "Development Mock Agent", "description": "Deterministic local agent for safe development testing", "endpoint_url": f"{settings.app_url}/api/dev/mock-agent", "http_method": "POST", "authentication_type": "none", "encrypted_credentials": None, "request_template": encode_json(DEFAULT_TEMPLATE), "response_path": "response.text", "request_headers": "{}", "timeout_ms": settings.default_timeout_ms, "status": "active" if settings.allow_local_endpoints else "draft", "last_connection_test_at": None, "last_connection_test_status": None, "created_at": timestamp, "updated_at": timestamp})
-    suite_ids = []
-    for suite_data in BUILT_INS:
-        suite_id = new_id("suite")
-        suite_ids.append(suite_id)
-        db.insert("test_suites", {"id": suite_id, "organization_id": DEMO_ORG_ID, "name": suite_data["suite"], "description": suite_data["description"], "is_default": 1, "created_at": timestamp, "updated_at": timestamp})
-        for name, category, severity, test_input, expected, evaluator, config in suite_data["cases"]:
-            db.insert("test_cases", {"id": new_id("case"), "test_suite_id": suite_id, "name": name, "description": "Built-in deterministic test", "category": category, "default_severity": severity, "input": test_input, "expected_behavior": expected, "evaluator_type": evaluator, "evaluator_config": encode_json({**config, "severity": severity}), "timeout_ms": settings.default_timeout_ms, "enabled": 1, "created_at": timestamp, "updated_at": timestamp})
+    db.insert("agents", {"id": agent_id, "organization_id": DEMO_ORG_ID, "name": "Development Mock Agent", "description": "Deterministic local agent for safe development testing", "endpoint_url": f"{settings.app_url}/api/dev/mock-agent", "http_method": "POST", "authentication_type": "none", "encrypted_credentials": None, "encrypted_request_headers": None, "request_template": encode_json(DEFAULT_TEMPLATE), "response_path": "response.text", "request_headers": "{}", "timeout_ms": settings.default_timeout_ms, "status": "active" if settings.allow_local_endpoints else "draft", "last_connection_test_at": None,"last_connection_test_status":None,"created_at":timestamp,"updated_at":timestamp})
+    suite_ids = seed_suites_for_org(db, DEMO_ORG_ID, settings.default_timeout_ms)
     security_cases = db.all("SELECT * FROM test_cases WHERE test_suite_id=? ORDER BY created_at", (suite_ids[0],))
     baseline_id = None
     for index, score in enumerate((96, 91, 76)):
