@@ -23,6 +23,7 @@
         <div id="credentials" hidden></div>
         <details class="advanced"><summary>Request configuration</summary>
           <label class="field-label" for="headers">Custom headers (JSON)</label><textarea id="headers" rows="3">{}</textarea>
+          <small class="secure-field-note">All custom header values are encrypted at rest and masked after saving.</small>
           <label class="field-label" for="request-template">Request template (JSON)</label><textarea id="request-template" rows="8">{
   "message": "{{test_input}}",
   "sessionId": "{{session_id}}",
@@ -76,7 +77,7 @@
   <dialog class="manager-dialog" id="agents-dialog"><div class="manager-shell"><aside><div class="manager-title"><div><span class="eyebrow">Connections</span><h2>Saved agents</h2></div><button data-close="agents-dialog">×</button></div><div id="agent-manager-list" class="manager-list"></div></aside><section><form id="agent-edit-form"><div class="manager-title"><div><span class="eyebrow">Agent configuration</span><h2 id="agent-edit-title">Select an agent</h2></div><span id="agent-edit-status" class="status-badge"></span></div><div id="agent-edit-fields" hidden>
     <label class="field-label">Name</label><input class="text-input" name="name" required><label class="field-label">Description</label><input class="text-input" name="description"><label class="field-label">POST endpoint</label><input class="text-input" name="endpointUrl" type="url" required>
     <div class="form-grid"><div><label class="field-label">Authentication</label><select name="authenticationType"><option value="none">None</option><option value="bearer">Bearer token</option><option value="api_key">API key header</option><option value="basic">Basic authentication</option></select></div><div><label class="field-label">Timeout (ms)</label><input class="text-input" name="timeoutMs" type="number" min="250" max="60000"></div></div>
-    <div id="agent-edit-credentials"></div><label class="field-label">Custom headers (JSON)</label><textarea name="requestHeaders" rows="3"></textarea><label class="field-label">Request template</label><textarea name="requestTemplate" rows="7"></textarea><label class="field-label">Response path</label><input class="text-input" name="responsePath">
+    <div id="agent-edit-credentials"></div><label class="field-label">Custom headers (JSON)</label><textarea name="requestHeaders" rows="3"></textarea><small class="secure-field-note">Saved values are masked. Leave every masked value unchanged to preserve them, or replace all values to rotate the header set.</small><label class="field-label">Request template</label><textarea name="requestTemplate" rows="7"></textarea><label class="field-label">Response path</label><input class="text-input" name="responsePath">
     <div class="manager-actions"><button type="button" class="danger-button" data-agent-action="delete">Delete</button><button type="button" class="secondary-button" data-agent-action="toggle"></button><button type="button" class="secondary-button" data-agent-action="test">Test connection</button><button type="submit">Save changes</button></div><div class="connection-result" id="agent-manager-result" hidden></div>
   </div></form></section></div></dialog>
 

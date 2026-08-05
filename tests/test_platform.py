@@ -42,6 +42,22 @@ class PlatformTests(unittest.TestCase):
             agent = self.service.create_agent("org_a", "user_a", {"name":"Agent","endpointUrl":"https://example.com","authenticationType":"bearer","credentials":{"token":"abc"},"requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text"})
         self.assertNotIn("encrypted_credentials", agent); self.assertEqual(agent["credentials"]["masked"], "••••••••")
 
+    def test_custom_headers_are_encrypted_masked_preserved_and_sent(self):
+        with patch("sentinel.service.validate_endpoint", return_value=("https://example.com", ["93.184.216.34"])):
+            agent = self.service.create_agent("org_a","user_a", {"name":"Agent","endpointUrl":"https://example.com","authenticationType":"none","requestHeaders":{"X-Tenant":"tenant-a","X-Secret":"secret-value"},"requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text"})
+        stored = self.db.one("SELECT request_headers,encrypted_request_headers FROM agents WHERE id=?",(agent["id"],))
+        self.assertEqual(stored["request_headers"],"{}"); self.assertNotIn("secret-value",stored["encrypted_request_headers"]); self.assertNotIn("encrypted_request_headers",agent)
+        self.assertEqual(agent["request_headers"],{"X-Tenant":"••••••••","X-Secret":"••••••••"})
+        raw = self.service._owned("agents",agent["id"],"org_a"); self.assertEqual(self.service.client._headers(raw)["X-Secret"],"secret-value")
+        self.service.update_agent("org_a","user_a",agent["id"],{"name":"Renamed","requestHeaders":agent["request_headers"]})
+        self.assertEqual(self.db.one("SELECT encrypted_request_headers FROM agents WHERE id=?",(agent["id"],))["encrypted_request_headers"],stored["encrypted_request_headers"])
+        with self.assertRaises(ValueError): self.service.update_agent("org_a","user_a",agent["id"],{"requestHeaders":{"X-Tenant":"new","X-Secret":"••••••••"}})
+
+    def test_legacy_plaintext_headers_are_migrated_on_service_start(self):
+        timestamp = now(); self.db.insert("agents", {"id":"agent_legacy","organization_id":"org_a","name":"Legacy","description":"","endpoint_url":"https://example.com","http_method":"POST","authentication_type":"none","encrypted_credentials":None,"encrypted_request_headers":None,"request_template":"{}","response_path":"response.text","request_headers":'{"X-Legacy":"secret"}',"timeout_ms":10000,"status":"draft","last_connection_test_at":None,"last_connection_test_status":None,"created_at":timestamp,"updated_at":timestamp})
+        LocusService(self.db,self.settings,self.vault); stored = self.db.one("SELECT request_headers,encrypted_request_headers FROM agents WHERE id='agent_legacy'")
+        self.assertEqual(stored["request_headers"],"{}"); self.assertEqual(self.vault.decrypt(stored["encrypted_request_headers"]),{"X-Legacy":"secret"})
+
     def test_agent_updates_preserve_or_rotate_credentials_and_revalidate_endpoint(self):
         with patch("sentinel.service.validate_endpoint", return_value=("https://example.com", ["93.184.216.34"])):
             agent = self.service.create_agent("org_a", "user_a", {"name":"Agent","endpointUrl":"https://example.com","authenticationType":"bearer","credentials":{"token":"first"},"requestTemplate":{"message":"{{test_input}}"},"responsePath":"response.text"})
@@ -130,7 +146,7 @@ class PlatformTests(unittest.TestCase):
 
     def test_versioned_migrations_are_recorded(self):
         versions = self.db.all("SELECT version,name FROM schema_migrations ORDER BY version")
-        self.assertEqual([row["version"] for row in versions], [1, 2, 3])
+        self.assertEqual([row["version"] for row in versions], [1, 2, 3, 4])
         self.assertTrue(self.db.one("SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'"))
 
     def test_password_hashing_signup_login_and_session_revocation(self):

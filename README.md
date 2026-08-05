@@ -127,7 +127,8 @@ The plaintext token is displayed only once. API clients send it as
 - DNS is resolved and checked again immediately before requests.
 - Local endpoints require `LOCUS_ALLOW_LOCAL_ENDPOINTS=true`, intended only for
   the built-in development mock agent.
-- Credentials are encrypted with Fernet and never returned after storage.
+- Credentials and all custom request-header values are encrypted with Fernet and
+  never returned after storage. Saved header names remain visible with masked values.
 - Unsafe headers are rejected and response secrets are recursively redacted.
 - Request/response sizes, timeouts, retries, worker concurrency, and organization
   execution counts are bounded.

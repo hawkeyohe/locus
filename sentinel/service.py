@@ -14,7 +14,7 @@ from .database import Database, decode_row, encode_json, new_id, now
 from .evaluators import EvaluationContext, evaluate, validate_evaluator_config
 from .jobs import DurableJobQueue
 from .scoring import calculate_scores, compare_results
-from .security import CredentialVault, mask_credentials, redact, validate_endpoint
+from .security import CredentialVault, mask_credentials, redact, safe_headers, validate_endpoint
 
 
 DEFAULT_TEMPLATE = {"message": "{{test_input}}", "sessionId": "{{session_id}}", "metadata": {"testRunId": "{{test_run_id}}", "testCaseId": "{{test_case_id}}"}}
@@ -34,6 +34,14 @@ class LocusService:
         self.queue = DurableJobQueue(db, settings)
         self.cancelled: set[str] = set()
         self._lock = threading.Lock()
+        self._migrate_legacy_headers()
+
+    def _migrate_legacy_headers(self) -> None:
+        for row in self.db.all("SELECT id,request_headers,encrypted_request_headers FROM agents WHERE encrypted_request_headers IS NULL AND request_headers<>'{}'"):
+            try: headers = json.loads(row["request_headers"] or "{}")
+            except json.JSONDecodeError: continue
+            if isinstance(headers,dict) and headers:
+                self.db.execute("UPDATE agents SET request_headers='{}',encrypted_request_headers=? WHERE id=?",(self.vault.encrypt(headers),row["id"]))
 
     def context(self, user_id: str, organization_id: str) -> dict[str, Any]:
         user = self.db.one("SELECT * FROM users WHERE id=? AND organization_id=?", (user_id, organization_id))
@@ -51,7 +59,9 @@ class LocusService:
     def public_agent(self, row: dict[str, Any]) -> dict[str, Any]:
         agent = decode_row(row) or {}
         encrypted = bool(agent.pop("encrypted_credentials", None))
-        agent["request_headers"] = redact(agent.get("request_headers", {}))
+        encrypted_headers = agent.pop("encrypted_request_headers", None); headers = self.vault.decrypt(encrypted_headers) if encrypted_headers else agent.get("request_headers", {})
+        agent["request_headers"] = {key:"••••••••" for key in headers}
+        agent["requestHeadersConfigured"] = bool(headers)
         agent["credentials"] = mask_credentials(agent["authentication_type"], encrypted)
         return agent
 
@@ -62,20 +72,29 @@ class LocusService:
         current = current or {}
         name = str(data.get("name", current.get("name", ""))).strip()
         if not name or len(name) > 120: raise ValueError("Agent name is required and must be 120 characters or fewer")
-        endpoint = str(data.get("endpointUrl", current.get("endpoint_url", ""))).strip(); validate_endpoint(endpoint, self.settings.allow_local_endpoints)
+        endpoint = str(data.get("endpointUrl", current.get("endpoint_url", ""))).strip()
+        if not current or endpoint != current.get("endpoint_url"): validate_endpoint(endpoint, self.settings.allow_local_endpoints)
         auth = data.get("authenticationType", current.get("authentication_type", "none"))
         if auth not in {"none", "bearer", "api_key", "basic"}: raise ValueError("Unsupported authentication type")
         template = data.get("requestTemplate", current.get("request_template", DEFAULT_TEMPLATE))
         if isinstance(template, str): template = json.loads(template)
         if not isinstance(template, dict): raise ValueError("Request template must be a JSON object")
-        headers = data.get("requestHeaders", current.get("request_headers", {}))
-        if not isinstance(headers, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in headers.items()): raise ValueError("Request headers must be a JSON object containing string values")
         response_path = str(data.get("responsePath", current.get("response_path", ""))).strip()
         if not response_path or not re.fullmatch(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*", response_path): raise ValueError("Response path must be a dot-separated JSON path")
         timeout = int(data.get("timeoutMs", current.get("timeout_ms", self.settings.default_timeout_ms)))
         if not 250 <= timeout <= 60000: raise ValueError("Timeout must be between 250 and 60000 ms")
         endpoint_changed = bool(current and endpoint != current.get("endpoint_url"))
-        return {"name":name,"description":str(data.get("description",current.get("description","")))[:500],"endpoint_url":endpoint,"authentication_type":auth,"request_template":encode_json(template),"response_path":response_path,"request_headers":encode_json(headers),"timeout_ms":timeout}, endpoint_changed
+        return {"name":name,"description":str(data.get("description",current.get("description","")))[:500],"endpoint_url":endpoint,"authentication_type":auth,"request_template":encode_json(template),"response_path":response_path,"request_headers":"{}","timeout_ms":timeout}, endpoint_changed
+
+    def _encrypted_headers(self, data: dict[str, Any], current: dict[str, Any] | None = None) -> str | None:
+        current = current or {}; existing_cipher = current.get("encrypted_request_headers"); existing = self.vault.decrypt(existing_cipher) if existing_cipher else current.get("request_headers", {})
+        if "requestHeaders" not in data: return existing_cipher or (self.vault.encrypt(existing) if existing else None)
+        headers = data["requestHeaders"]
+        if not isinstance(headers,dict) or not all(isinstance(key,str) and isinstance(value,str) for key,value in headers.items()): raise ValueError("Request headers must be a JSON object containing string values")
+        safe_headers(headers); masked = {"••••••••","[REDACTED]"}
+        if headers and all(value in masked for value in headers.values()) and set(headers) == set(existing): return existing_cipher or self.vault.encrypt(existing)
+        if any(value in masked for value in headers.values()): raise ValueError("Replace every masked header value when changing custom headers")
+        return self.vault.encrypt(headers) if headers else None
 
     def _encrypted_credentials(self, auth: str, data: dict[str, Any], current: dict[str, Any] | None = None) -> str | None:
         if auth == "none": return None
@@ -91,16 +110,16 @@ class LocusService:
     def create_agent(self, org_id: str, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         fields, _ = self._agent_fields(data); auth = fields["authentication_type"]
         timestamp, agent_id = now(), new_id("agent")
-        self.db.insert("agents", {"id":agent_id,"organization_id":org_id,**fields,"http_method":"POST","encrypted_credentials":self._encrypted_credentials(auth,data),"status":"draft","last_connection_test_at":None,"last_connection_test_status":None,"created_at":timestamp,"updated_at":timestamp})
+        self.db.insert("agents", {"id":agent_id,"organization_id":org_id,**fields,"http_method":"POST","encrypted_credentials":self._encrypted_credentials(auth,data),"encrypted_request_headers":self._encrypted_headers(data),"status":"draft","last_connection_test_at":None,"last_connection_test_status":None,"created_at":timestamp,"updated_at":timestamp})
         self.audit(org_id, user_id, "agent.created", "agent", agent_id, {"endpointUrl": fields["endpoint_url"]})
         return self.public_agent(self.db.one("SELECT * FROM agents WHERE id=?", (agent_id,)) or {})
 
     def update_agent(self, org_id: str, user_id: str, agent_id: str, data: dict[str, Any]) -> dict[str, Any]:
         current = self._owned("agents", agent_id, org_id)
-        fields, endpoint_changed = self._agent_fields(data,current); fields.update({"encrypted_credentials":self._encrypted_credentials(fields["authentication_type"],data,current),"updated_at":now()})
+        fields, endpoint_changed = self._agent_fields(data,current); fields.update({"encrypted_credentials":self._encrypted_credentials(fields["authentication_type"],data,current),"encrypted_request_headers":self._encrypted_headers(data,current),"updated_at":now()})
         if endpoint_changed: fields.update({"status":"draft","last_connection_test_at":None,"last_connection_test_status":None})
         self.db.execute(f"UPDATE agents SET {','.join(f'{key}=?' for key in fields)} WHERE id=? AND organization_id=?", (*fields.values(), agent_id, org_id))
-        self.audit(org_id, user_id, "agent.updated", "agent", agent_id, {"endpointChanged": endpoint_changed, "credentialsChanged": "credentials" in data})
+        self.audit(org_id, user_id, "agent.updated", "agent", agent_id, {"endpointChanged": endpoint_changed, "credentialsChanged": "credentials" in data, "headersChanged":"requestHeaders" in data and not all(value == "••••••••" for value in data.get("requestHeaders",{}).values())})
         return self.public_agent(self.db.one("SELECT * FROM agents WHERE id=?", (agent_id,)) or {})
 
     def delete_agent(self, org_id: str, user_id: str, agent_id: str) -> None:
