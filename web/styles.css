@@ -26,6 +26,37 @@ body {
   letter-spacing: -.005em;
 }
 button, input, select, textarea { font: inherit; }
+.auth-pending > * { visibility: hidden; }
+body:not(.authenticated) .topbar, body:not(.authenticated) .app-shell, body:not(.authenticated) > dialog { display: none; }
+body.authenticated .auth-screen { display: none; }
+.auth-screen { min-height: 100vh; display: grid; grid-template-columns: 1.05fr .95fr; background: white; }
+.auth-story { padding: clamp(32px,6vw,90px); display: flex; flex-direction: column; justify-content: space-between; color: white; background: radial-gradient(circle at 80% 20%,rgba(91,156,255,.3),transparent 35%),linear-gradient(145deg,#0c3275,#1769d2); }
+.auth-brand { align-self: flex-start; color: white; }
+.auth-story h1 { max-width: 650px; margin: 14px 0; font-size: clamp(34px,5vw,67px); line-height: 1.02; letter-spacing: -.055em; }
+.auth-story p { max-width: 600px; color: #dbeafe; font-size: 15px; line-height: 1.7; }
+.auth-kicker { color: #bfdbfe; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.auth-proof { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 10px; }
+.auth-proof span { padding: 8px 10px; color: #dbeafe; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.16); border-radius: 8px; font-size: 9px; }
+.auth-panel { padding: 30px; display: grid; place-items: center; }
+.auth-card { width: min(410px,100%); }
+.auth-tabs { margin-bottom: 30px; display: grid; grid-template-columns: 1fr 1fr; background: #f2f4f7; border-radius: 9px; padding: 4px; }
+.auth-tabs button { padding: 9px; color: var(--muted); background: transparent; border: 0; border-radius: 7px; font-size: 10px; font-weight: 750; cursor: pointer; }
+.auth-tabs button.active { color: var(--blue); background: white; box-shadow: 0 2px 8px rgba(16,24,40,.08); }
+.auth-card h2 { margin: 0; font-size: 26px; letter-spacing: -.035em; }
+.auth-card form > p { margin: 7px 0 24px; color: var(--muted); font-size: 11px; }
+.auth-card form label { margin: 12px 0 5px; display: block; color: #344054; font-size: 9px; font-weight: 700; }
+.auth-card form input { width: 100%; padding: 11px; border: 1px solid var(--line); border-radius: 8px; }
+.auth-card form small { margin-top: 5px; display: block; color: var(--muted); font-size: 8px; }
+.auth-card form button[type="submit"] { width: 100%; margin-top: 20px; padding: 12px; color: white; background: var(--blue); border: 0; border-radius: 8px; font-weight: 750; cursor: pointer; }
+.auth-error { margin-top: 12px; padding: 10px; color: var(--red); background: var(--red-light); border-radius: 7px; font-size: 9px; }
+.account-button, .logout-button { padding: 0; display: flex; align-items: center; gap: 6px; color: var(--ink); background: transparent; border: 0; font-size: 9px; font-weight: 700; cursor: pointer; }
+.logout-button { color: var(--muted); }
+.onboarding-banner { grid-column: 1/-1; margin: 14px 18px 0; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; color: #173b7a; background: var(--blue-light); border: 1px solid #b8d5ff; border-radius: 10px; }
+.onboarding-banner span, .onboarding-banner strong { display: block; }
+.onboarding-banner span { font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.onboarding-banner strong { margin-top: 3px; font-size: 13px; }
+.onboarding-banner p { margin: 3px 0 0; font-size: 9px; }
+.onboarding-banner button { padding: 8px 10px; color: white; background: var(--blue); border: 0; border-radius: 7px; font-size: 9px; font-weight: 750; cursor: pointer; }
 .topbar {
   height: 72px;
   padding: 0 28px;
@@ -630,6 +661,9 @@ dialog::backdrop { background: rgba(16,24,40,.5); backdrop-filter: blur(3px); }
   .detail-panel { min-height: auto; }
 }
 @media (max-width: 720px) {
+  .auth-screen { grid-template-columns: 1fr; }
+  .auth-story { min-height: 330px; }
+  .auth-panel { padding: 35px 22px; }
   .topbar { grid-template-columns: 1fr auto; padding: 0 18px; }
   .product-nav, .help-button, .avatar { display: none; }
   .app-shell { display: block; }

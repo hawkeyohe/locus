@@ -96,12 +96,18 @@ subset of enabled checks, set bounded request concurrency and timeout overrides,
 stream stored partial results through polling, and cooperatively cancel remaining
 work without discarding completed evidence.
 
-## API identity
+## Browser and API identity
 
-Production APIs require an opaque bearer token. Only a SHA-256 token digest is
-stored, and the server derives the user and organization from that record. Browser
-organization headers are not trusted. Demo mode supplies the seeded identity when
-no bearer token is present.
+Browser users can create an organization and owner account, sign in with a password,
+and sign out. Passwords use salted scrypt hashes. Browser sessions are random,
+revocable, expire after 14 days, and are stored in HttpOnly, SameSite cookies with
+the Secure flag in production. New organizations receive the built-in deterministic
+test suites and enter the first-agent onboarding flow.
+
+API clients can use an opaque bearer token. Only a SHA-256 token digest is stored,
+and the server derives the user and organization from that record. Browser-provided
+organization IDs are not trusted. Demo mode supplies the seeded identity when no
+browser session or bearer token is present.
 
 Issue a token for an existing user:
 
@@ -110,9 +116,7 @@ Issue a token for an existing user:
 ```
 
 The plaintext token is displayed only once. API clients send it as
-`Authorization: Bearer <token>`. The browser client reads an optional token from
-`sessionStorage` under `locus_access_token`; production login/SSO UI remains a
-deployment integration.
+`Authorization: Bearer <token>`.
 
 ## Security defaults
 
@@ -198,8 +202,8 @@ checked-in development encryption fallback outside local development.
 
 - SQLite is intended for local development; production PostgreSQL deployment and
   backup infrastructure must be provisioned by the operator.
-- Bearer tokens are available, but interactive login, SSO, password recovery, and
-  organization administration remain production identity-provider integrations.
+- Email/password login is available, but email verification, password recovery,
+  SSO, invitations, and organization administration remain future identity work.
 - Redirects are disabled rather than revalidated through a redirect chain.
 - Cancellation is cooperative between test cases, not during an active HTTP request.
 - Tool-call evaluation is reserved for a future optional response-path configuration.

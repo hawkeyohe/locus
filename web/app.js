@@ -1,14 +1,23 @@
 const state = { agents: [], suites: [], runs: [], selectedRun: null, selectedAgent: null, selectedSuite: null, editingCase: null, testSuiteId: null, currentReport: null, reportFilters: { search: "", status: "all", severity: "all", category: "all", regression: "all" }, pendingAgent: null, poller: null };
 const api = async (path, options = {}) => {
-  const token = sessionStorage.getItem("locus_access_token");
-  const response = await fetch(path, { headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) }, ...options });
+  const response = await fetch(path, { credentials: "same-origin", headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options });
   const data = await response.json();
+  if (response.status === 401 && !path.startsWith("/api/auth/")) showAuth();
   if (!response.ok) throw new Error(data.error || "Request failed");
   return data;
 };
 const esc = value => String(value ?? "").replace(/[&<>"']/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[character]));
 const human = value => String(value || "").replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase());
 const fmtDate = value => value ? new Date(value).toLocaleString() : "—";
+
+function showAuthError(message) { const box = document.querySelector("#auth-error"); box.hidden = !message; box.textContent = message || ""; }
+function showWorkspace(user, onboarding = false) { document.body.classList.remove("auth-pending"); document.body.classList.add("authenticated"); document.querySelector("#user-name").textContent = user.name; document.querySelector("#user-avatar").textContent = user.name.split(/\s+/).map(part => part[0]).join("").slice(0,2).toUpperCase(); document.querySelector("#onboarding-banner").hidden = !onboarding; }
+function showAuth() { document.body.classList.remove("auth-pending","authenticated"); }
+document.querySelectorAll("[data-auth-tab]").forEach(button => { button.onclick = () => { document.querySelectorAll("[data-auth-tab]").forEach(item => item.classList.toggle("active",item === button)); document.querySelector("#login-form").hidden = button.dataset.authTab !== "login"; document.querySelector("#signup-form").hidden = button.dataset.authTab !== "signup"; showAuthError(""); }; });
+async function submitAuth(event, mode) { event.preventDefault(); const form = new FormData(event.currentTarget), button = event.currentTarget.querySelector("button[type='submit']"); button.disabled = true; showAuthError(""); try { const payload = Object.fromEntries(form.entries()), result = await api(`/api/auth/${mode}`, { method:"POST",body:JSON.stringify(payload) }); showWorkspace(result.user,Boolean(result.onboarding)); await load(); } catch (error) { showAuthError(error.message); } finally { button.disabled = false; } }
+document.querySelector("#login-form").onsubmit = event => submitAuth(event,"login"); document.querySelector("#signup-form").onsubmit = event => submitAuth(event,"signup");
+document.querySelector("#logout").onclick = async () => { try { await api("/api/auth/logout",{method:"POST",body:"{}"}); } finally { clearInterval(state.poller); showAuth(); } };
+document.querySelector("#dismiss-onboarding").onclick = () => { document.querySelector("#onboarding-banner").hidden = true; };
 
 function credentials() {
   const type = document.querySelector("#auth-type").value;
@@ -132,4 +141,5 @@ document.querySelector("#suite-edit-form").onclick = async event => { const butt
 document.querySelector("#add-managed-test").onclick = () => { if (state.selectedSuite) openTestEditor(null, state.selectedSuite); };
 document.querySelector("#managed-cases").onclick = async event => { const button = event.target.closest("[data-case-action]"); if (!button) return; const suite = state.suites.find(item => item.id === state.selectedSuite), test = suite?.testCases.find(item => item.id === button.dataset.caseId); if (!test) return; try { if (button.dataset.caseAction === "edit") return openTestEditor(test, suite.id); if (button.dataset.caseAction === "toggle") await api(`/api/test-cases/${test.id}/${test.enabled ? "disable" : "enable"}`, { method: "POST", body: "{}" }); if (button.dataset.caseAction === "delete" && confirm(`Delete ${test.name}?`)) await api(`/api/test-cases/${test.id}`, { method: "DELETE" }); await load(); selectSuite(suite.id); } catch (error) { showManagerResult("#suite-manager-result", error.message, false); } };
 document.querySelectorAll("[data-close]").forEach(button => { button.onclick = () => document.querySelector(`#${button.dataset.close}`).close(); });
-load().catch(error => { document.querySelector("#detail").innerHTML = `<div class="empty"><strong>${esc(error.message)}</strong></div>`; });
+async function bootstrap() { try { const result = await api("/api/auth/me"); showWorkspace(result.user); await load(); } catch (error) { showAuth(); } }
+bootstrap();

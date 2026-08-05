@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from cryptography.fernet import Fernet
 
-from sentinel.auth import AuthenticationError, TokenService
+from sentinel.auth import AuthenticationError, SessionService, TokenService, hash_password, verify_password
 from sentinel.config import Settings
 from sentinel.connectivity import AgentResponse
 from sentinel.database import Database, encode_json, now
@@ -130,8 +130,26 @@ class PlatformTests(unittest.TestCase):
 
     def test_versioned_migrations_are_recorded(self):
         versions = self.db.all("SELECT version,name FROM schema_migrations ORDER BY version")
-        self.assertEqual([row["version"] for row in versions], [1, 2])
+        self.assertEqual([row["version"] for row in versions], [1, 2, 3])
         self.assertTrue(self.db.one("SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'"))
+
+    def test_password_hashing_signup_login_and_session_revocation(self):
+        encoded = hash_password("a-secure-password")
+        self.assertTrue(verify_password("a-secure-password", encoded)); self.assertFalse(verify_password("wrong-password", encoded)); self.assertNotIn("a-secure-password", encoded)
+        sessions = SessionService(self.db); user, token = sessions.signup("Owner", "Owner@Example.com", "another-secure-password", "Acme")
+        self.assertEqual((user["email"],user["organizationName"],user["role"]),("owner@example.com","Acme","owner")); self.assertNotIn("password_hash", user)
+        stored_user = self.db.one("SELECT password_hash FROM users WHERE id=?",(user["id"],)); stored_session = self.db.one("SELECT token_hash FROM auth_sessions WHERE user_id=?",(user["id"],))
+        self.assertNotIn("another-secure-password",stored_user["password_hash"]); self.assertNotEqual(stored_session["token_hash"],token)
+        authenticated = sessions.authenticate(token); self.assertEqual(authenticated["id"], user["id"])
+        logged_in, next_token = sessions.login("owner@example.com", "another-secure-password"); self.assertEqual(logged_in["id"],user["id"])
+        sessions.revoke(next_token)
+        with self.assertRaises(AuthenticationError): sessions.authenticate(next_token)
+
+    def test_signup_rejects_duplicate_email_and_short_password(self):
+        sessions = SessionService(self.db)
+        with self.assertRaises(ValueError): sessions.signup("Owner","owner@example.com","short","Acme")
+        sessions.signup("Owner","owner@example.com","another-secure-password","Acme")
+        with self.assertRaises(ValueError): sessions.signup("Other","OWNER@example.com","another-secure-password","Other")
 
     def test_durable_queue_deduplicates_and_recovers_expired_lease(self):
         with patch("sentinel.service.validate_endpoint", return_value=("https://example.com", ["93.184.216.34"])):

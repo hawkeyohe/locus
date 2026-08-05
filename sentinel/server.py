@@ -3,18 +3,19 @@ from __future__ import annotations
 import json
 import mimetypes
 import time
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .auth import AuthenticationError, TokenService
+from .auth import AuthenticationError, SessionService, TokenService
 from .config import settings
 from .database import Database
 from .limits import RateLimitError, SlidingWindowLimiter
 from .jobs import Worker
 from .observability import Metrics, log_event, request_id, route_name
 from .security import CredentialVault
-from .seed import DEMO_ORG_ID, DEMO_USER_ID, seed_demo
+from .seed import DEMO_ORG_ID, DEMO_USER_ID, seed_demo, seed_suites_for_org
 from .service import AuthorizationError, ConflictError, LocusService, NotFoundError
 
 
@@ -25,6 +26,7 @@ VAULT = CredentialVault(settings.encryption_key)
 SERVICE = LocusService(DB, settings, VAULT)
 EMBEDDED_WORKER = Worker(SERVICE.queue, SERVICE._execute_run, settings, "embedded")
 TOKENS = TokenService(DB)
+SESSIONS = SessionService(DB)
 LIMITER = SlidingWindowLimiter()
 METRICS = Metrics()
 if settings.demo_seed:
@@ -58,10 +60,12 @@ class Handler(BaseHTTPRequestHandler):
         if settings.environment == "production": self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         super().end_headers()
 
-    def _json(self, payload: object, status: int = 200) -> None:
+    def _json(self, payload: object, status: int = 200, headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.response_status = status
-        self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body)
+        self.send_response(status); self.send_header("Content-Type", "application/json; charset=utf-8"); self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "no-store")
+        for name, value in (headers or {}).items(): self.send_header(name, value)
+        self.end_headers(); self.wfile.write(body)
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
@@ -75,8 +79,16 @@ class Handler(BaseHTTPRequestHandler):
         if settings.demo_seed and not authorization:
             SERVICE.context(DEMO_USER_ID, DEMO_ORG_ID)
             return DEMO_USER_ID, DEMO_ORG_ID
-        user = TOKENS.authenticate(authorization)
+        user = TOKENS.authenticate(authorization) if authorization else SESSIONS.authenticate(self._session_token())
         return user["id"], user["organization_id"]
+
+    def _session_token(self) -> str | None:
+        cookie = SimpleCookie(); cookie.load(self.headers.get("Cookie", "")); value = cookie.get("locus_session")
+        return value.value if value else None
+
+    def _session_cookie(self, token: str) -> str:
+        secure = "; Secure" if settings.environment == "production" else ""
+        return f"locus_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=1209600{secure}"
 
     def _handle(self, method: str) -> None:
         parsed = urlparse(self.path); path = parsed.path.rstrip("/") or "/"; parts = path.strip("/").split("/")
@@ -94,6 +106,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(status); self.send_header("Content-Type", "text/plain"); self.send_header("Content-Length", str(len(payload))); self.end_headers(); self.wfile.write(payload)
             else: self._json(payload, status)
             return
+        if path == "/api/auth/signup" and method == "POST":
+            LIMITER.check(f"auth:{self.client_address[0]}",settings.auth_attempts_per_minute)
+            data = self._body(); user, token = SESSIONS.signup(str(data.get("name","")),str(data.get("email","")),str(data.get("password","")),str(data.get("organizationName",""))); seed_suites_for_org(DB,user["organizationId"],settings.default_timeout_ms)
+            return self._json({"user":user,"onboarding":True},201,{"Set-Cookie":self._session_cookie(token)})
+        if path == "/api/auth/login" and method == "POST":
+            LIMITER.check(f"auth:{self.client_address[0]}",settings.auth_attempts_per_minute)
+            data = self._body(); user, token = SESSIONS.login(str(data.get("email","")),str(data.get("password","")))
+            return self._json({"user":user},headers={"Set-Cookie":self._session_cookie(token)})
+        if path == "/api/auth/logout" and method == "POST":
+            SESSIONS.revoke(self._session_token()); return self._json({"signedOut":True},headers={"Set-Cookie":"locus_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"})
+        if path == "/api/auth/me" and method == "GET":
+            if settings.demo_seed and not self.headers.get("Authorization") and not self._session_token():
+                user = DB.one("SELECT u.*,o.name AS organization_name FROM users u JOIN organizations o ON o.id=u.organization_id WHERE u.id=?",(DEMO_USER_ID,)); return self._json({"user":SESSIONS.public_user(user or {})})
+            user = TOKENS.authenticate(self.headers.get("Authorization")) if self.headers.get("Authorization") else SESSIONS.authenticate(self._session_token()); return self._json({"user":user})
         user_id, org_id = self._identity(); LIMITER.check(f"org:{org_id}", settings.organization_requests_per_minute); data = self._body() if method in {"POST", "PATCH", "PUT"} else {}
         if path == "/api/dashboard" and method == "GET": return self._json(SERVICE.dashboard(org_id))
         if path == "/api/agents":

@@ -1,13 +1,18 @@
 <!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Locus — Continuous AI Agent Testing</title><link rel="stylesheet" href="/styles.css"></head>
-<body>
+<body class="auth-pending">
+  <section class="auth-screen" id="auth-screen">
+    <div class="auth-story"><a class="brand auth-brand" href="#"><span class="brand-mark">L</span>Locus</a><div><span class="auth-kicker">Continuous assurance</span><h1>Know how your AI agent fails before your users do.</h1><p>Test production agents against deterministic security, reliability, and business-rule checks—then track every regression.</p><div class="auth-proof"><span>✓ Endpoint-based testing</span><span>✓ Credentials encrypted</span><span>✓ Evidence-backed reports</span></div></div></div>
+    <div class="auth-panel"><div class="auth-card"><div class="auth-tabs"><button class="active" data-auth-tab="login">Sign in</button><button data-auth-tab="signup">Create account</button></div><form id="login-form"><h2>Welcome back</h2><p>Sign in to your Locus workspace.</p><label>Email</label><input name="email" type="email" autocomplete="email" required><label>Password</label><input name="password" type="password" autocomplete="current-password" required><button type="submit">Sign in</button></form><form id="signup-form" hidden><h2>Create your workspace</h2><p>Start with the built-in security and reliability suites.</p><label>Your name</label><input name="name" autocomplete="name" required><label>Work email</label><input name="email" type="email" autocomplete="email" required><label>Organization</label><input name="organizationName" autocomplete="organization" required><label>Password</label><input name="password" type="password" minlength="12" autocomplete="new-password" required><small>Use at least 12 characters.</small><button type="submit">Create workspace</button></form><div class="auth-error" id="auth-error" hidden></div></div></div>
+  </section>
   <header class="topbar">
     <a class="brand" href="#"><span class="brand-mark">L</span>Locus</a>
     <nav class="product-nav"><a class="active" href="#workspace">Workspace</a><button id="manage-agents">Agents</button><button id="manage-suites">Test library</button><a href="#report">Reports</a></nav>
-    <div class="top-actions"><div class="live"><span></span>Systems ready</div><span class="avatar">DU</span></div>
+    <div class="top-actions"><div class="live"><span></span>Systems ready</div><button class="account-button" id="account-button"><span class="avatar" id="user-avatar">DU</span><span id="user-name">Account</span></button><button class="logout-button" id="logout">Sign out</button></div>
   </header>
   <main class="app-shell" id="workspace">
+    <div class="onboarding-banner" id="onboarding-banner" hidden><div><span>Welcome to Locus</span><strong>Connect your first agent to begin testing.</strong><p>Your workspace already includes security, reliability, and business-rule test suites.</p></div><button id="dismiss-onboarding">Got it</button></div>
     <aside class="setup-column">
       <div class="column-heading"><span class="step">1</span><div><h1>Connect an agent</h1><p>Authenticated HTTP endpoints only.</p></div><button class="heading-action" id="manage-agents-secondary">Manage</button></div>
       <form id="agent-form">
