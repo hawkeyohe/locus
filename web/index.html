@@ -14,7 +14,6 @@
   <main class="app-shell" id="workspace">
     <div class="onboarding-banner" id="onboarding-banner" hidden><div><span>Welcome to Locus</span><strong>Connect your first agent to begin testing.</strong><p>Your workspace already includes security, reliability, and business-rule test suites.</p></div><button id="dismiss-onboarding">Got it</button></div>
     <aside class="setup-column">
-      <div class="column-heading"><span class="step">1</span><div><h1>Connect an agent</h1><p>Authenticated HTTP endpoints only.</p></div><button class="heading-action" id="manage-agents-secondary">Manage</button></div>
       <form id="agent-form">
         <label class="field-label" for="agent-name">Agent name</label><input class="text-input" id="agent-name" required placeholder="Customer support agent">
         <label class="field-label" for="agent-description">Description</label><input class="text-input" id="agent-description" placeholder="Production support endpoint">
@@ -41,7 +40,6 @@
     </aside>
 
     <section class="diagnostics-column" id="runs">
-      <div class="column-heading"><span class="step">2</span><div><h2>Run a test suite</h2><p>Choose a validated agent and deterministic checks.</p></div><button class="heading-action" id="manage-suites-secondary">Manage</button></div>
       <div class="overview-card"><div><span class="overview-label">Continuous assurance</span><strong>Security & reliability baseline</strong><p>Track failures and regressions across versions.</p></div><div class="health-ring"><span id="health-score">—</span></div></div>
       <div class="metrics" id="metrics"></div>
       <div class="dashboard-insights"><div class="mini-panel"><div class="mini-heading"><strong>Score trend</strong><span>Last 10 completed runs</span></div><div id="score-trend" class="score-trend"></div></div><div class="mini-panel"><div class="mini-heading"><strong>Open findings</strong><span>By severity</span></div><div id="severity-chart" class="severity-chart"></div></div></div>
