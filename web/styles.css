@@ -92,19 +92,8 @@ body.authenticated .auth-screen { display: none; }
   font-size: 17px;
 }
 .product-nav { height: 100%; display: flex; align-items: center; gap: 28px; }
-.product-nav a {
-  height: 100%;
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  border-bottom: 2px solid transparent;
-  font-size: 12px;
-  font-weight: 650;
-  text-decoration: none;
-}
-.product-nav button { height: 100%; padding: 0; color: var(--muted); background: transparent; border: 0; border-bottom: 2px solid transparent; font-size: 12px; font-weight: 650; cursor: pointer; }
+.product-nav button { height: 100%; padding: 0; color: var(--muted); background: transparent; border: 0; font-size: 12px; font-weight: 650; cursor: pointer; }
 .product-nav button:hover { color: var(--blue); }
-.product-nav a.active { color: var(--blue); border-bottom-color: var(--blue); }
 .top-actions { display: flex; align-items: center; gap: 10px; }
 .live {
   padding: 8px 12px;
