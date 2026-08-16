@@ -16,13 +16,14 @@ from .limits import RateLimitError, SlidingWindowLimiter
 from .jobs import Worker
 from .observability import Metrics, log_event, request_id, route_name
 from .security import CredentialVault
-from .seed import DEMO_ORG_ID, DEMO_USER_ID, seed_demo, seed_suites_for_org
+from .seed import DEMO_ORG_ID, DEMO_USER_ID, seed_demo, seed_suites_for_org, sync_builtin_suites
 from .service import AuthorizationError, ConflictError, LocusService, NotFoundError
 
 
 STATIC = settings.static_dir
 settings.validate()
 DB = Database(settings.database_dsn)
+sync_builtin_suites(DB, settings.default_timeout_ms)
 VAULT = CredentialVault(settings.encryption_key)
 SERVICE = LocusService(DB, settings, VAULT)
 EMBEDDED_WORKER = Worker(SERVICE.queue, SERVICE._execute_run, settings, "embedded")

@@ -119,6 +119,15 @@ subset of enabled checks, set bounded request concurrency and timeout overrides,
 stream stored partial results through polling, and cooperatively cancel remaining
 work without discarding completed evidence.
 
+New organizations receive 37 deterministic built-in checks: 31 security cases,
+five reliability cases, and one business-rule example. Security coverage includes
+direct and indirect prompt injection, role and delimiter spoofing, encoded
+instructions, fabricated authorization, refusal persistence, credential and PII
+extraction, cross-session access, destructive and financial actions, scope
+escalation, fabricated tool success, and unsupported claims. Built-ins have stable
+keys and are synchronized idempotently at startup, so existing organizations gain
+new checks without duplicating suites or overwriting customer-edited cases.
+
 ## Browser and API identity
 
 Browser users can create an organization and owner account, sign in with a password,

@@ -12,11 +12,12 @@ from sentinel.auth import AuthenticationError, SessionService, TokenService, has
 from sentinel.config import Settings
 from sentinel.connectivity import AgentResponse
 from sentinel.database import Database, encode_json, now
-from sentinel.evaluators import EvaluationContext, evaluate
+from sentinel.evaluators import EvaluationContext, evaluate, validate_evaluator_config
 from sentinel.limits import RateLimitError, SlidingWindowLimiter
 from sentinel.jobs import Worker
 from sentinel.scoring import calculate_scores, compare_results
 from sentinel.security import CredentialVault, SecurityError, extract_path, redact, substitute_template, validate_endpoint
+from sentinel.seed import BUILT_INS, seed_suites_for_org, sync_builtin_suites
 from sentinel.service import AuthorizationError, ConflictError, LocusService
 
 
@@ -158,8 +159,49 @@ class PlatformTests(unittest.TestCase):
 
     def test_versioned_migrations_are_recorded(self):
         versions = self.db.all("SELECT version,name FROM schema_migrations ORDER BY version")
-        self.assertEqual([row["version"] for row in versions], [1, 2, 3, 4])
+        self.assertEqual([row["version"] for row in versions], [1, 2, 3, 4, 5])
         self.assertTrue(self.db.one("SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'"))
+        suite_columns = {row["name"] for row in self.db.all("PRAGMA table_info(test_suites)")}
+        case_columns = {row["name"] for row in self.db.all("PRAGMA table_info(test_cases)")}
+        self.assertIn("builtin_key", suite_columns); self.assertIn("builtin_key", case_columns)
+
+    def test_builtin_attack_library_is_complete_and_idempotent(self):
+        expected_cases = sum(len(suite["cases"]) for suite in BUILT_INS)
+        security = next(suite for suite in BUILT_INS if suite["key"] == "security-baseline-v1")
+        self.assertGreaterEqual(len(security["cases"]), 25)
+        self.assertEqual(
+            {case["category"] for case in security["cases"]},
+            {"prompt_injection", "sensitive_data", "tool_misuse", "hallucination"},
+        )
+        keys = [case["key"] for suite in BUILT_INS for case in suite["cases"]]
+        self.assertEqual(len(keys), len(set(keys)))
+        for suite in BUILT_INS:
+            for case in suite["cases"]:
+                validate_evaluator_config(case["evaluator"], case["config"])
+        seed_suites_for_org(self.db, "org_a")
+        first_counts = (
+            self.db.one("SELECT COUNT(*) AS count FROM test_suites WHERE organization_id='org_a'")["count"],
+            self.db.one("SELECT COUNT(*) AS count FROM test_cases c JOIN test_suites s ON s.id=c.test_suite_id WHERE s.organization_id='org_a'")["count"],
+        )
+        seed_suites_for_org(self.db, "org_a")
+        second_counts = (
+            self.db.one("SELECT COUNT(*) AS count FROM test_suites WHERE organization_id='org_a'")["count"],
+            self.db.one("SELECT COUNT(*) AS count FROM test_cases c JOIN test_suites s ON s.id=c.test_suite_id WHERE s.organization_id='org_a'")["count"],
+        )
+        self.assertEqual(first_counts, (len(BUILT_INS), expected_cases))
+        self.assertEqual(second_counts, first_counts)
+
+    def test_builtin_sync_upgrades_existing_organizations_without_overwriting_custom_tests(self):
+        timestamp = now()
+        self.db.insert("test_suites", {"id":"legacy_security","organization_id":"org_b","name":"Security baseline","description":"Existing","is_default":1,"builtin_key":None,"created_at":timestamp,"updated_at":timestamp})
+        self.db.insert("test_cases", {"id":"legacy_case","test_suite_id":"legacy_security","name":"Reject system prompt disclosure","description":"Edited by customer","category":"prompt_injection","default_severity":"low","input":"customized input","expected_behavior":"customized expected behavior","evaluator_type":"refusal_detection","evaluator_config":"{}","timeout_ms":9000,"enabled":0,"builtin_key":None,"created_at":timestamp,"updated_at":timestamp})
+        self.db.insert("test_cases", {"id":"custom_case","test_suite_id":"legacy_security","name":"Customer-specific safeguard","description":"Custom","category":"business_rule","default_severity":"high","input":"custom","expected_behavior":"custom","evaluator_type":"non_empty_response","evaluator_config":"{}","timeout_ms":9000,"enabled":1,"builtin_key":None,"created_at":timestamp,"updated_at":timestamp})
+        sync_builtin_suites(self.db)
+        original = self.db.one("SELECT * FROM test_cases WHERE id='legacy_case'")
+        self.assertEqual((original["description"], original["input"], original["enabled"]), ("Edited by customer", "customized input", 0))
+        self.assertEqual(original["builtin_key"], "prompt-system-disclosure")
+        self.assertTrue(self.db.one("SELECT id FROM test_cases WHERE id='custom_case'"))
+        self.assertEqual(self.db.one("SELECT COUNT(*) AS count FROM test_suites WHERE organization_id='org_b' AND name='Security baseline'")["count"], 1)
 
     def test_password_hashing_signup_login_and_session_revocation(self):
         encoded = hash_password("a-secure-password")
