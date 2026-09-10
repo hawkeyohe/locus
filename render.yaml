@@ -17,6 +17,8 @@ services:
         generateValue: true
       - key: LOCUS_APP_URL
         value: https://locus-staging.onrender.com
+      - key: LOCUS_HOSTED_DEMO_AGENT_URL
+        value: https://locus-staging-demo-agent.onrender.com/agent
       - key: LOCUS_HOST
         value: 0.0.0.0
       - key: LOCUS_PORT
@@ -31,3 +33,15 @@ services:
         value: "true"
       - key: LOCUS_WORKER_CONCURRENCY
         value: "1"
+  - type: web
+    name: locus-staging-demo-agent
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python -m sentinel.demo_agent
+    healthCheckPath: /health/ready
+    envVars:
+      - key: LOCUS_HOST
+        value: 0.0.0.0
+      - key: LOCUS_PORT
+        value: "8000"

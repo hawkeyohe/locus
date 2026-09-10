@@ -12,18 +12,19 @@ from urllib.parse import parse_qs, urlparse
 from .auth import AuthenticationError, SessionService, TokenService
 from .config import settings
 from .database import Database
+from .demo_agent import mock_response
 from .limits import RateLimitError, SlidingWindowLimiter
 from .jobs import Worker
 from .observability import Metrics, log_event, request_id, route_name
 from .security import CredentialVault
-from .seed import DEMO_ORG_ID, DEMO_USER_ID, seed_demo, seed_suites_for_org, sync_builtin_suites
+from .seed import DEMO_ORG_ID, DEMO_USER_ID, ensure_hosted_demo_agent, seed_demo, seed_suites_for_org, sync_builtin_content
 from .service import AuthorizationError, ConflictError, LocusService, NotFoundError
 
 
 STATIC = settings.static_dir
 settings.validate()
 DB = Database(settings.database_dsn)
-sync_builtin_suites(DB, settings.default_timeout_ms)
+sync_builtin_content(DB, settings)
 VAULT = CredentialVault(settings.encryption_key)
 SERVICE = LocusService(DB, settings, VAULT)
 EMBEDDED_WORKER = Worker(SERVICE.queue, SERVICE._execute_run, settings, "embedded")
@@ -33,20 +34,6 @@ LIMITER = SlidingWindowLimiter()
 METRICS = Metrics()
 if settings.demo_seed:
     seed_demo(DB, settings, VAULT)
-
-
-def mock_agent(message: str) -> tuple[int, object, float]:
-    lowered = message.lower()
-    if "timeout" in lowered: return 200, {"response": {"text": "Delayed response"}}, 2.0
-    if "invalid json" in lowered: return 200, b"not-json", 0
-    if "missing response" in lowered: return 200, {"status": "ok"}, 0
-    if "empty response" in lowered: return 200, {"response": {"text": ""}}, 0
-    if "http 500" in lowered: return 500, {"error": "Fake development failure"}, 0
-    if "system prompt" in lowered or "another customer" in lowered or "api key" in lowered:
-        return 200, {"response": {"text": "I cannot provide private information, credentials, or internal instructions."}}, 0
-    if "delete" in lowered: return 200, {"response": {"text": "I cannot perform that action without explicit authorization and confirmation."}}, 0
-    if "refund" in lowered: return 200, {"response": {"text": "Manager approval is required for refunds above $1,000."}}, 0
-    return 200, {"response": {"text": "READY"}}, 0
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -104,14 +91,14 @@ class Handler(BaseHTTPRequestHandler):
         if not path.startswith("/api/") and method == "GET": return self._static(path)
         LIMITER.check(f"ip:{self.client_address[0]}", settings.api_requests_per_minute)
         if path == "/api/dev/mock-agent" and method == "POST" and settings.demo_seed:
-            data = self._body(); message = str(data.get("message", "")); status, payload, delay = mock_agent(message); time.sleep(delay)
+            data = self._body(); message = str(data.get("message", "")); status, payload, delay = mock_response(message); time.sleep(delay)
             if isinstance(payload, bytes):
                 self.send_response(status); self.send_header("Content-Type", "text/plain"); self.send_header("Content-Length", str(len(payload))); self.end_headers(); self.wfile.write(payload)
             else: self._json(payload, status)
             return
         if path == "/api/auth/signup" and method == "POST":
             LIMITER.check(f"auth:{self.client_address[0]}",settings.auth_attempts_per_minute)
-            data = self._body(); user, token = SESSIONS.signup(str(data.get("name","")),str(data.get("email","")),str(data.get("password","")),str(data.get("organizationName",""))); seed_suites_for_org(DB,user["organizationId"],settings.default_timeout_ms)
+            data = self._body(); user, token = SESSIONS.signup(str(data.get("name","")),str(data.get("email","")),str(data.get("password","")),str(data.get("organizationName",""))); seed_suites_for_org(DB,user["organizationId"],settings.default_timeout_ms); ensure_hosted_demo_agent(DB,user["organizationId"],settings.hosted_demo_agent_url,settings.default_timeout_ms)
             return self._json({"user":user,"onboarding":True},201,{"Set-Cookie":self._session_cookie(token)})
         if path == "/api/auth/login" and method == "POST":
             LIMITER.check(f"auth:{self.client_address[0]}",settings.auth_attempts_per_minute)

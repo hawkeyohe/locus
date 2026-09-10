@@ -72,8 +72,10 @@ restarts; upgrade to a standalone worker before depending on production SLAs.
 4. Confirm that the web service plan is Free, then apply the Blueprint.
 5. After deployment, open `https://locus-staging.onrender.com/health/ready` and
    confirm the database reports ready.
-6. Open the staging URL, create the first owner account, and complete the
-   agent-to-report smoke test.
+6. Confirm `https://locus-staging-demo-agent.onrender.com/health/ready` reports
+   ready. The second free service is a deterministic, no-secret demo agent.
+7. Open the staging URL, create an owner account, select **Hosted Demo Agent**,
+   and run the Reliability baseline to complete the agent-to-report smoke test.
 
 If Render assigns a different hostname because the service name is already in
 use, update `LOCUS_APP_URL` to the actual HTTPS service URL. Do not rotate
@@ -118,6 +120,19 @@ and populated with editable, individually enabled checks. Each run can select a
 subset of enabled checks, set bounded request concurrency and timeout overrides,
 stream stored partial results through polling, and cooperatively cancel remaining
 work without discarding completed evidence.
+
+### Hosted demo agent
+
+Staging provisions a **Hosted Demo Agent** in every workspace, including accounts
+that existed before the demo service was deployed. It is a separate public HTTPS
+service with no model dependency, credentials, customer data, or tool access. Use
+it to exercise connection testing, queued runs, evaluators, reports, and regression
+comparisons before connecting a real agent.
+
+The normal security and reliability suites can be run directly against it. Custom
+tests containing `invalid json`, `missing response`, `empty response`, `http 500`,
+or `timeout` activate its deterministic response and transport failure modes. The
+public service caps request bodies and does not log prompt contents.
 
 New organizations receive 37 deterministic built-in checks: 31 security cases,
 five reliability cases, and one business-rule example. Security coverage includes

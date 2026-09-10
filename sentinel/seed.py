@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from .config import Settings
@@ -110,6 +111,56 @@ def seed_suites_for_org(db: Database, organization_id: str, timeout_ms: int = 10
 def sync_builtin_suites(db: Database, timeout_ms: int = 10000) -> None:
     for organization in db.all("SELECT id FROM organizations"):
         seed_suites_for_org(db, organization["id"], timeout_ms)
+
+
+def ensure_hosted_demo_agent(db: Database, organization_id: str, endpoint_url: str,
+                             timeout_ms: int = 10000) -> str | None:
+    """Provision the first-party hosted demo agent without enabling local endpoints."""
+    endpoint_url = endpoint_url.strip()
+    if not endpoint_url:
+        return None
+    if not endpoint_url.startswith("https://"):
+        raise ValueError("Hosted demo agent endpoint must use HTTPS")
+    digest = hashlib.sha256(organization_id.encode()).hexdigest()[:16]
+    agent_id, timestamp = f"agent_demo_{digest}", now()
+    existing = db.one("SELECT status,created_at FROM agents WHERE id=?", (agent_id,))
+    values = {
+        "organization_id": organization_id,
+        "name": "Hosted Demo Agent",
+        "description": "First-party deterministic agent for trying Locus safely",
+        "endpoint_url": endpoint_url,
+        "http_method": "POST",
+        "authentication_type": "none",
+        "encrypted_credentials": None,
+        "encrypted_request_headers": None,
+        "request_template": encode_json(DEFAULT_TEMPLATE),
+        "response_path": "response.text",
+        "request_headers": "{}",
+        "timeout_ms": max(10000, timeout_ms),
+        "status": "disabled" if existing and existing["status"] == "disabled" else "active",
+        "last_connection_test_at": None,
+        "last_connection_test_status": None,
+        "updated_at": timestamp,
+    }
+    if existing:
+        db.execute(
+            f"UPDATE agents SET {','.join(f'{key}=?' for key in values)} WHERE id=?",
+            (*values.values(), agent_id),
+        )
+    else:
+        db.insert("agents", {"id": agent_id, **values, "created_at": timestamp})
+    return agent_id
+
+
+def sync_builtin_content(db: Database, settings: Settings) -> None:
+    for organization in db.all("SELECT id FROM organizations"):
+        seed_suites_for_org(db, organization["id"], settings.default_timeout_ms)
+        ensure_hosted_demo_agent(
+            db,
+            organization["id"],
+            settings.hosted_demo_agent_url,
+            settings.default_timeout_ms,
+        )
 
 
 def seed_demo(db: Database, settings: Settings, vault: CredentialVault) -> None:

@@ -35,6 +35,7 @@ class Settings:
     database_url: str = os.getenv("LOCUS_DATABASE_URL", "")
     encryption_key: str = os.getenv("LOCUS_ENCRYPTION_KEY", "development-only-change-me")
     app_url: str = os.getenv("LOCUS_APP_URL", "http://127.0.0.1:8000")
+    hosted_demo_agent_url: str = os.getenv("LOCUS_HOSTED_DEMO_AGENT_URL", "")
     host: str = os.getenv("LOCUS_HOST", "127.0.0.1")
     port: int = int(os.getenv("LOCUS_PORT", "8000"))
     static_dir: Path = Path(os.getenv("LOCUS_STATIC_DIR", str(Path(__file__).resolve().parent.parent / "web")))
@@ -77,6 +78,8 @@ class Settings:
                 raise ValueError("A production LOCUS_ENCRYPTION_KEY is required")
             if not self.metrics_token:
                 raise ValueError("A production LOCUS_METRICS_TOKEN is required")
+            if self.hosted_demo_agent_url and not self.hosted_demo_agent_url.startswith("https://"):
+                raise ValueError("LOCUS_HOSTED_DEMO_AGENT_URL must use HTTPS in production")
 
 
 settings = Settings()
