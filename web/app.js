@@ -64,9 +64,24 @@ function renderDashboard(data) {
 document.querySelector("#score-trend").onclick = event => { const button = event.target.closest("[data-dashboard-run]"); if (button) showRun(button.dataset.dashboardRun); };
 function renderSelectors() {
   const agentSelect = document.querySelector("#agent-select"), suiteSelect = document.querySelector("#suite-select"); const oldAgent = agentSelect.value, oldSuite = suiteSelect.value;
-  agentSelect.innerHTML = state.agents.length ? state.agents.map(agent => `<option value="${agent.id}" ${agent.status !== "active" ? "disabled" : ""}>${esc(agent.name)} · ${human(agent.status)}</option>`).join("") : '<option value="">Connect an agent first</option>';
+  agentSelect.replaceChildren();
+  if (state.agents.length) {
+    for (const agent of state.agents) {
+      const option = new Option(`${agent.name} · ${human(agent.status)}`, agent.id);
+      option.disabled = agent.status !== "active";
+      agentSelect.add(option);
+    }
+    const active = state.agents.find(agent => agent.status === "active");
+    const previous = state.agents.find(agent => agent.id === oldAgent && agent.status === "active");
+    if (previous) agentSelect.value = previous.id;
+    else if (active) agentSelect.value = active.id;
+    agentSelect.disabled = !active;
+  } else {
+    agentSelect.add(new Option("No agents available", ""));
+    agentSelect.disabled = true;
+  }
   suiteSelect.innerHTML = state.suites.map(suite => `<option value="${suite.id}">${esc(suite.name)} · ${suite.testCases.length} tests</option>`).join("");
-  if ([...agentSelect.options].some(option => option.value === oldAgent)) agentSelect.value = oldAgent; if ([...suiteSelect.options].some(option => option.value === oldSuite)) suiteSelect.value = oldSuite; renderCases();
+  if ([...suiteSelect.options].some(option => option.value === oldSuite)) suiteSelect.value = oldSuite; renderCases();
 }
 function updateSelectedCaseCount() { const boxes = [...document.querySelectorAll("#suite-cases input[type='checkbox']")], selected = boxes.filter(box => box.checked); document.querySelector("#selected-case-count").textContent = `${selected.length} of ${boxes.length} tests selected`; document.querySelector("#toggle-cases").textContent = selected.length === boxes.length ? "Clear all" : "Select all"; }
 function renderCases() { const suite = state.suites.find(item => item.id === document.querySelector("#suite-select").value), enabled = suite?.testCases.filter(test => test.enabled) || []; document.querySelector("#suite-cases").innerHTML = enabled.length ? enabled.map(test => `<label class="case-row"><input type="checkbox" value="${esc(test.id)}" checked><span><strong>${esc(test.name)}</strong><small>${human(test.category)} · ${human(test.default_severity)}</small></span></label>`).join("") : '<div class="empty-small">No enabled tests in this suite.</div>'; updateSelectedCaseCount(); }

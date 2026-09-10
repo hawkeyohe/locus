@@ -44,7 +44,7 @@
       <div class="metrics" id="metrics"></div>
       <div class="dashboard-insights"><div class="mini-panel"><div class="mini-heading"><strong>Score trend</strong><span>Last 10 completed runs</span></div><div id="score-trend" class="score-trend"></div></div><div class="mini-panel"><div class="mini-heading"><strong>Open findings</strong><span>By severity</span></div><div id="severity-chart" class="severity-chart"></div></div></div>
       <div class="run-config panel">
-        <label class="field-label" for="agent-select">Agent</label><select id="agent-select"></select>
+        <label class="field-label" for="agent-select">Agent</label><select id="agent-select" disabled><option value="">Loading agents…</option></select>
         <label class="field-label" for="suite-select">Test suite</label><select id="suite-select"></select>
         <div class="case-toolbar"><span id="selected-case-count">0 tests selected</span><button type="button" id="toggle-cases">Clear all</button></div>
         <div id="suite-cases" class="suite-cases"></div>
@@ -84,5 +84,5 @@
     <div class="case-heading"><div><span class="eyebrow">Included checks</span><h3>Test cases</h3></div><button type="button" class="secondary-button" id="add-managed-test">+ Add test</button></div><div id="managed-cases" class="managed-cases"></div><div class="connection-result" id="suite-manager-result" hidden></div>
   </div></form></section></div></dialog>
   <template id="trace-template"><button class="trace-row"><span class="status-icon"></span><span class="trace-main"><strong></strong><small></small></span><span class="confidence"></span><span class="row-arrow">›</span></button></template>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=20260909-2"></script>
 </body></html>
