@@ -13,6 +13,14 @@ class AuthenticationError(PermissionError):
     pass
 
 
+def principal_identity(user: dict[str, Any]) -> tuple[str, str]:
+    """Normalize browser-session and bearer-token principals for service calls."""
+    organization_id = user.get("organization_id") or user.get("organizationId")
+    if not user.get("id") or not organization_id:
+        raise AuthenticationError("Authenticated identity is incomplete")
+    return str(user["id"]), str(organization_id)
+
+
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 

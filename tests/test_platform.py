@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from cryptography.fernet import Fernet
 
-from sentinel.auth import AuthenticationError, SessionService, TokenService, hash_password, verify_password
+from sentinel.auth import AuthenticationError, SessionService, TokenService, hash_password, principal_identity, verify_password
 from sentinel.config import Settings
 from sentinel.connectivity import AgentResponse
 from sentinel.database import Database, encode_json, now
@@ -128,7 +128,16 @@ class PlatformTests(unittest.TestCase):
         stored = self.db.one("SELECT * FROM api_tokens WHERE user_id='user_a'")
         self.assertNotEqual(stored["token_hash"], plaintext)
         tokens.revoke("user_a", stored["id"])
-        with self.assertRaises(AuthenticationError): tokens.authenticate(f"Bearer {plaintext}")
+        with self.assertRaises(AuthenticationError):
+            tokens.authenticate(f"Bearer {plaintext}")
+
+    def test_browser_and_bearer_principals_normalize_to_service_identity(self):
+        browser_principal = {"id": "user_a", "organizationId": "org_a"}
+        bearer_principal = {"id": "user_a", "organization_id": "org_a"}
+        self.assertEqual(principal_identity(browser_principal), ("user_a", "org_a"))
+        self.assertEqual(principal_identity(bearer_principal), ("user_a", "org_a"))
+        with self.assertRaises(AuthenticationError):
+            principal_identity({"id": "user_a"})
 
     def test_missing_and_expired_tokens_are_rejected(self):
         tokens = TokenService(self.db)
@@ -263,6 +272,7 @@ class PlatformTests(unittest.TestCase):
         stored_user = self.db.one("SELECT password_hash FROM users WHERE id=?",(user["id"],)); stored_session = self.db.one("SELECT token_hash FROM auth_sessions WHERE user_id=?",(user["id"],))
         self.assertNotIn("another-secure-password",stored_user["password_hash"]); self.assertNotEqual(stored_session["token_hash"],token)
         authenticated = sessions.authenticate(token); self.assertEqual(authenticated["id"], user["id"])
+        self.assertEqual(principal_identity(authenticated), (user["id"], user["organizationId"]))
         logged_in, next_token = sessions.login("owner@example.com", "another-secure-password"); self.assertEqual(logged_in["id"],user["id"])
         sessions.revoke(next_token)
         with self.assertRaises(AuthenticationError): sessions.authenticate(next_token)

@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .auth import AuthenticationError, SessionService, TokenService
+from .auth import AuthenticationError, SessionService, TokenService, principal_identity
 from .config import settings
 from .database import Database
 from .demo_agent import mock_response
@@ -69,7 +69,7 @@ class Handler(BaseHTTPRequestHandler):
             SERVICE.context(DEMO_USER_ID, DEMO_ORG_ID)
             return DEMO_USER_ID, DEMO_ORG_ID
         user = TOKENS.authenticate(authorization) if authorization else SESSIONS.authenticate(self._session_token())
-        return user["id"], user["organization_id"]
+        return principal_identity(user)
 
     def _session_token(self) -> str | None:
         cookie = SimpleCookie(); cookie.load(self.headers.get("Cookie", "")); value = cookie.get("locus_session")
