@@ -7,7 +7,7 @@ const api = async (path, options = {}) => {
   return data;
 };
 const esc = value => String(value ?? "").replace(/[&<>"']/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[character]));
-const human = value => String(value || "").replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase());
+const human = value => String(value || "").replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
 const fmtDate = value => value ? new Date(value).toLocaleString() : "—";
 
 function showAuthError(message) { const box = document.querySelector("#auth-error"); box.hidden = !message; box.textContent = message || ""; }
@@ -50,9 +50,12 @@ document.querySelector("#test-connection").onclick = async () => {
 };
 
 async function load() {
-  const [dashboard, agents, suites, runs] = await Promise.all([api("/api/dashboard"), api("/api/agents"), api("/api/test-suites"), api("/api/test-runs")]);
-  state.agents = agents.agents; state.suites = suites.testSuites; state.runs = runs.testRuns;
-  renderDashboard(dashboard); renderSelectors(); renderRuns();
+  const agents = await api("/api/agents");
+  state.agents = Array.isArray(agents.agents) ? agents.agents : [];
+  renderAgentSelector();
+  const [dashboard, suites, runs] = await Promise.all([api("/api/dashboard"), api("/api/test-suites"), api("/api/test-runs")]);
+  state.suites = Array.isArray(suites.testSuites) ? suites.testSuites : []; state.runs = Array.isArray(runs.testRuns) ? runs.testRuns : [];
+  renderDashboard(dashboard); renderSuiteSelector(); renderRuns();
   if (state.selectedRun) await showRun(state.selectedRun, false);
 }
 function renderDashboard(data) {
@@ -62,14 +65,16 @@ function renderDashboard(data) {
   const maximum = Math.max(1, ...Object.values(data.findingsBySeverity)); document.querySelector("#severity-chart").innerHTML = Object.entries(data.findingsBySeverity).map(([severity,count]) => `<div><span>${human(severity)}</span><i><b class="${severity}" style="width:${(count/maximum)*100}%"></b></i><strong>${count}</strong></div>`).join("");
 }
 document.querySelector("#score-trend").onclick = event => { const button = event.target.closest("[data-dashboard-run]"); if (button) showRun(button.dataset.dashboardRun); };
-function renderSelectors() {
-  const agentSelect = document.querySelector("#agent-select"), suiteSelect = document.querySelector("#suite-select"); const oldAgent = agentSelect.value, oldSuite = suiteSelect.value;
-  agentSelect.replaceChildren();
+function renderAgentSelector() {
+  const agentSelect = document.querySelector("#agent-select"), oldAgent = agentSelect.value;
+  agentSelect.innerHTML = "";
   if (state.agents.length) {
     for (const agent of state.agents) {
-      const option = new Option(`${agent.name} · ${human(agent.status)}`, agent.id);
+      const option = document.createElement("option");
+      option.value = agent.id;
+      option.textContent = `${agent.name} · ${human(agent.status)}`;
       option.disabled = agent.status !== "active";
-      agentSelect.add(option);
+      agentSelect.appendChild(option);
     }
     const active = state.agents.find(agent => agent.status === "active");
     const previous = state.agents.find(agent => agent.id === oldAgent && agent.status === "active");
@@ -77,9 +82,15 @@ function renderSelectors() {
     else if (active) agentSelect.value = active.id;
     agentSelect.disabled = !active;
   } else {
-    agentSelect.add(new Option("No agents available", ""));
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No agents available";
+    agentSelect.appendChild(option);
     agentSelect.disabled = true;
   }
+}
+function renderSuiteSelector() {
+  const suiteSelect = document.querySelector("#suite-select"), oldSuite = suiteSelect.value;
   suiteSelect.innerHTML = state.suites.map(suite => `<option value="${suite.id}">${esc(suite.name)} · ${suite.testCases.length} tests</option>`).join("");
   if ([...suiteSelect.options].some(option => option.value === oldSuite)) suiteSelect.value = oldSuite; renderCases();
 }
